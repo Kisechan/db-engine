@@ -1,281 +1,257 @@
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::path::PathBuf;
 
-use log::error;
-
+use super::fm_bid::BlockId;
 use super::fm_file_header::FileHeader;
 use super::fm_page_header::PageHeader;
-use super::{bincode_options, BLOCK_SIZE};
 
-/// Provides block-level access to a managed file and keeps the on-disk header in sync.
+// 文件头块编号常量（块 0）
+const HEADER_BLOCK_NUMBER: u32 = 0;
+
+// FileHandle: 对单个表/文件的抽象，封装了对块的读写、分配和释放逻辑
 pub struct FileHandle {
     file: File,
+    path: PathBuf,
+    block_size: usize,
     header: FileHeader,
     header_dirty: bool,
-    path: PathBuf,
 }
 
 impl FileHandle {
-    pub(crate) fn new(mut file: File, header: FileHeader, path: PathBuf) -> io::Result<Self> {
-        file.seek(SeekFrom::Start(0))?;
-        Ok(Self {
+    // 内部构造器，FileManager 打开文件后返回 FileHandle
+    pub(crate) fn new(file: File, path: PathBuf, block_size: usize, header: FileHeader) -> Self {
+        Self {
             file,
+            path,
+            block_size,
             header,
             header_dirty: false,
-            path,
-        })
+        }
     }
 
-    pub fn header(&self) -> &FileHeader {
-        &self.header
+    // 返回块大小（字节）
+    pub fn block_size(&self) -> usize {
+        self.block_size
     }
 
-    pub fn header_mut(&mut self) -> &mut FileHeader {
-        self.header_dirty = true;
-        &mut self.header
+    // 读取内存中的文件头副本
+    pub fn header(&self) -> FileHeader {
+        self.header
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub fn read_block(&mut self, block_num: u32, buf: &mut [u8]) -> io::Result<()> {
-        self.ensure_block_range(block_num)?;
-        if buf.len() != BLOCK_SIZE {
+    // 从指定块读取整个块数据到 buffer
+    pub fn read_block(&mut self, block: BlockId, buffer: &mut [u8]) -> io::Result<()> {
+        // 校验 buffer 长度是否和块大小一致
+        if buffer.len() != self.block_size {
             return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "buffer size must match BLOCK_SIZE",
-            ));
-        }
-        self.file.seek(SeekFrom::Start(block_offset(block_num)))?;
-        self.file.read_exact(buf)?;
-        Ok(())
-    }
-
-    pub fn write_block(&mut self, block_num: u32, buf: &[u8]) -> io::Result<()> {
-        self.ensure_block_range(block_num)?;
-        if buf.len() != BLOCK_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "buffer size must match BLOCK_SIZE",
-            ));
-        }
-        self.file.seek(SeekFrom::Start(block_offset(block_num)))?;
-        self.file.write_all(buf)?;
-        Ok(())
-    }
-
-    pub fn sync(&mut self) -> io::Result<()> {
-        self.flush_header()?;
-        self.file.sync_all()?;
-        Ok(())
-    }
-
-    pub fn allocate_block(&mut self) -> io::Result<u32> {
-        self.allocate_block_with_space(0)
-    }
-
-    pub fn allocate_block_with_space(&mut self, min_free_bytes: u32) -> io::Result<u32> {
-        if let Some(block) = self.take_free_block(min_free_bytes)? {
-            return Ok(block);
-        }
-        self.append_block()
-    }
-
-    pub fn free_block(&mut self, block_num: u32) -> io::Result<()> {
-        if block_num == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "block 0 is reserved for the file header",
-            ));
-        }
-        let mut page_hdr = self.read_page_header(block_num)?;
-        if page_hdr.prev_free_page != -1
-            || page_hdr.next_free_page != -1
-            || self.header.first_free_hole == block_num as i32
-        {
-            return Ok(());
-        }
-        page_hdr.free_bytes = PageHeader::max_free_bytes();
-        page_hdr.prev_free_page = -1;
-        page_hdr.next_free_page = self.header.first_free_hole;
-        self.write_page_header(block_num, &page_hdr)?;
-        if page_hdr.next_free_page >= 0 {
-            let mut next = self.read_page_header(page_hdr.next_free_page as u32)?;
-            next.prev_free_page = block_num as i32;
-            self.write_page_header(page_hdr.next_free_page as u32, &next)?;
-        }
-        self.header.first_free_hole = block_num as i32;
-        self.header_dirty = true;
-        Ok(())
-    }
-
-    pub fn read_page_header(&mut self, block_num: u32) -> io::Result<PageHeader> {
-        self.ensure_block_range(block_num)?;
-        let mut buf = vec![0u8; PageHeader::encoded_len()];
-        self.file.seek(SeekFrom::Start(block_offset(block_num)))?;
-        self.file.read_exact(&mut buf)?;
-        let page_hdr: PageHeader = bincode_options()
-            .deserialize(&buf)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        Ok(page_hdr)
-    }
-
-    pub fn write_page_header(&mut self, block_num: u32, hdr: &PageHeader) -> io::Result<()> {
-        self.ensure_block_range(block_num)?;
-        let bytes = bincode_options()
-            .serialize(hdr)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        if bytes.len() > BLOCK_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "page header larger than block",
-            ));
-        }
-        self.file.seek(SeekFrom::Start(block_offset(block_num)))?;
-        self.file.write_all(&bytes)?;
-        if bytes.len() < PageHeader::encoded_len() {
-            let pad = vec![0u8; PageHeader::encoded_len() - bytes.len()];
-            self.file.write_all(&pad)?;
-        }
-        Ok(())
-    }
-
-    pub fn update_free_bytes(&mut self, block_num: u32, free_bytes: u32) -> io::Result<()> {
-        if free_bytes as usize > BLOCK_SIZE - PageHeader::encoded_len() {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "free_bytes exceeds block payload",
-            ));
-        }
-        let mut page_hdr = self.read_page_header(block_num)?;
-        let was_in_list = page_hdr.prev_free_page != -1
-            || page_hdr.next_free_page != -1
-            || self.header.first_free_hole == block_num as i32;
-        let should_be_in_list = free_bytes > 0;
-        page_hdr.free_bytes = free_bytes;
-
-        match (was_in_list, should_be_in_list) {
-            (true, false) => {
-                let saved = page_hdr;
-                self.detach_from_free_list(block_num, &saved)?;
-                page_hdr.prev_free_page = -1;
-                page_hdr.next_free_page = -1;
-            }
-            (false, true) => {
-                page_hdr.next_free_page = self.header.first_free_hole;
-                page_hdr.prev_free_page = -1;
-                if page_hdr.next_free_page >= 0 {
-                    let mut next = self.read_page_header(page_hdr.next_free_page as u32)?;
-                    next.prev_free_page = block_num as i32;
-                    self.write_page_header(page_hdr.next_free_page as u32, &next)?;
-                }
-                self.header.first_free_hole = block_num as i32;
-                self.header_dirty = true;
-            }
-            _ => {}
-        }
-
-        self.write_page_header(block_num, &page_hdr)
-    }
-
-    fn ensure_block_range(&self, block_num: u32) -> io::Result<()> {
-        if block_num >= self.header.blk_cnt {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
+                ErrorKind::InvalidInput,
                 format!(
-                    "block {} out of range (current block count: {})",
-                    block_num, self.header.blk_cnt
+                    "buffer 长度 {} 与块大小 {} 不匹配",
+                    buffer.len(),
+                    self.block_size
+                ),
+            ));
+        }
+
+        // 不能将文件头块当成数据块读取
+        if block.number == HEADER_BLOCK_NUMBER {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "不能把文件头块作为数据块读取",
+            ));
+        }
+
+        self.ensure_valid_block(block.number)?;
+        self.seek_to_block(block.number)?;
+        self.file.read_exact(buffer)
+    }
+
+    // 将 buffer 的整块数据写回指定块
+    pub fn write_block(&mut self, block: BlockId, buffer: &[u8]) -> io::Result<()> {
+        if buffer.len() != self.block_size {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "buffer 长度 {} 与块大小 {} 不匹配",
+                    buffer.len(),
+                    self.block_size
+                ),
+            ));
+        }
+
+        // 禁止直接覆盖文件头块（文件头由 FileHandle 管理并在需要时写回）
+        if block.number == HEADER_BLOCK_NUMBER {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "不能直接覆盖文件头块",
+            ));
+        }
+
+        self.ensure_valid_block(block.number)?;
+        self.seek_to_block(block.number)?;
+        self.file.write_all(buffer)
+    }
+
+    // 分配一个可用块：优先使用空闲链表，否则扩展文件
+    pub fn allocate_block(&mut self) -> io::Result<BlockId> {
+        if self.header.first_free_hole >= 0 {
+            // 从空闲链表头取出一个块
+            let block_num = self.header.first_free_hole as u32;
+            let mut page_header = self.read_page_header(block_num)?;
+
+            // 更新文件头指向下一个空闲块
+            self.header.first_free_hole = page_header.next_free_page;
+            self.header_dirty = true;
+
+            // 如果有下一个空闲块，清除其 prev 指向
+            if page_header.next_free_page >= 0 {
+                let mut next_header = self.read_page_header(page_header.next_free_page as u32)?;
+                next_header.prev_free_page = -1;
+                self.write_page_header(page_header.next_free_page as u32, &next_header)?;
+            }
+
+            // 清理分配后页头的链表指针，写回磁盘
+            page_header.next_free_page = -1;
+            page_header.prev_free_page = -1;
+            self.write_page_header(block_num, &page_header)?;
+
+            Ok(BlockId::new(block_num))
+        } else {
+            // 否则扩展文件，增加一个新块
+            let block_num = self.header.block_count;
+            self.ensure_capacity(block_num)?;
+
+            let page_header = PageHeader::clear(self.payload_capacity());
+            self.header.block_count += 1;
+            self.header_dirty = true;
+
+            // 将新块初始化为零（包含页头），以保证确定性
+            self.zero_block(block_num, page_header)?;
+
+            Ok(BlockId::new(block_num))
+        }
+    }
+
+    // 释放一个块并将其插入空闲链表头
+    pub fn release_block(&mut self, block: BlockId) -> io::Result<()> {
+        if block.number == HEADER_BLOCK_NUMBER {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "不能释放文件头块",
+            ));
+        }
+        self.ensure_valid_block(block.number)?;
+
+        // 构造空闲页头并写回磁盘（同时清空页内容）
+        let page_header = PageHeader::new_free(self.payload_capacity(), self.header.first_free_hole);
+        self.zero_block(block.number, page_header)?;
+
+        // 如果原先有空闲链表头，需要更新其 prev 指向
+        if self.header.first_free_hole >= 0 {
+            let mut next_header = self.read_page_header(self.header.first_free_hole as u32)?;
+            next_header.prev_free_page = block.number as i32;
+            self.write_page_header(self.header.first_free_hole as u32, &next_header)?;
+        }
+
+        // 将该释放块设置为新的空闲链表头
+        self.header.first_free_hole = block.number as i32;
+        self.header_dirty = true;
+        Ok(())
+    }
+
+    // 将内存中脏的文件头写回并 flush 文件
+    pub fn flush(&mut self) -> io::Result<()> {
+        if self.header_dirty {
+            self.write_header()?;
+            self.header_dirty = false;
+        }
+        self.file.flush()
+    }
+
+    // 将整个块清零并在块首写入 page header
+    fn zero_block(&mut self, block_number: u32, page_header: PageHeader) -> io::Result<()> {
+        let mut buffer = vec![0u8; self.block_size];
+        buffer[..PageHeader::BYTE_SIZE].copy_from_slice(&page_header.to_bytes());
+        self.seek_to_block(block_number)?;
+        self.file.write_all(&buffer)?;
+        Ok(())
+    }
+
+    // 验证块号是否在合理范围内（并排除文件头块）
+    fn ensure_valid_block(&self, block_number: u32) -> io::Result<()> {
+        if block_number == HEADER_BLOCK_NUMBER {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "文件头块不能作为数据块访问",
+            ));
+        }
+        if block_number >= self.header.block_count {
+            return Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "块 {} 超出范围（当前块数量 {}）",
+                    block_number, self.header.block_count
                 ),
             ));
         }
         Ok(())
     }
 
-    fn take_free_block(&mut self, min_free_bytes: u32) -> io::Result<Option<u32>> {
-        let mut current = self.header.first_free_hole;
-        while current >= 0 {
-            let block = current as u32;
-            let mut page_hdr = self.read_page_header(block)?;
-            if page_hdr.free_bytes >= min_free_bytes {
-                self.detach_from_free_list(block, &page_hdr)?;
-                page_hdr.next_free_page = -1;
-                page_hdr.prev_free_page = -1;
-                self.write_page_header(block, &page_hdr)?;
-                return Ok(Some(block));
-            }
-            current = page_hdr.next_free_page;
-        }
-        Ok(None)
+    // 返回块内可用于存放数据的字节数（不包含页头）
+    fn payload_capacity(&self) -> u32 {
+        (self.block_size - PageHeader::BYTE_SIZE) as u32
     }
 
-    fn detach_from_free_list(&mut self, block: u32, page_hdr: &PageHeader) -> io::Result<()> {
-        if page_hdr.prev_free_page >= 0 {
-            let mut prev = self.read_page_header(page_hdr.prev_free_page as u32)?;
-            prev.next_free_page = page_hdr.next_free_page;
-            self.write_page_header(page_hdr.prev_free_page as u32, &prev)?;
-        } else {
-            self.header.first_free_hole = page_hdr.next_free_page;
-            self.header_dirty = true;
+    // 确保文件至少能容纳指定块号（按文件长度扩展）
+    fn ensure_capacity(&mut self, block_number: u32) -> io::Result<()> {
+        let required_len = (block_number as u64 + 1) * self.block_size as u64;
+        let current_len = self.file.metadata()?.len();
+        if current_len < required_len {
+            self.file.set_len(required_len)?;
         }
-
-        if page_hdr.next_free_page >= 0 {
-            let mut next = self.read_page_header(page_hdr.next_free_page as u32)?;
-            next.prev_free_page = page_hdr.prev_free_page;
-            self.write_page_header(page_hdr.next_free_page as u32, &next)?;
-        }
-
         Ok(())
     }
 
-    fn append_block(&mut self) -> io::Result<u32> {
-        let new_block = self.header.blk_cnt;
-        let offset = block_offset(new_block);
-        self.file.seek(SeekFrom::Start(offset))?;
-        let page_hdr = PageHeader::new_free();
-        let mut block = vec![0u8; BLOCK_SIZE];
-        let hdr_bytes = bincode_options()
-            .serialize(&page_hdr)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        block[..hdr_bytes.len()].copy_from_slice(&hdr_bytes);
-        self.file.write_all(&block)?;
-        self.header.blk_cnt += 1;
-        self.header_dirty = true;
-        Ok(new_block)
+    // 读取指定块的页头（块起始处的 PageHeader）
+    fn read_page_header(&mut self, block_number: u32) -> io::Result<PageHeader> {
+        self.seek_to_block(block_number)?;
+        let mut buf = [0u8; PageHeader::BYTE_SIZE];
+        self.file.read_exact(&mut buf)?;
+        PageHeader::from_bytes(&buf)
     }
 
-    fn flush_header(&mut self) -> io::Result<()> {
-        if !self.header_dirty {
-            return Ok(());
-        }
-        let bytes = bincode_options()
-            .serialize(&self.header)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        if bytes.len() > BLOCK_SIZE {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "file header larger than block",
-            ));
-        }
-        self.file.seek(SeekFrom::Start(0))?;
-        let mut block = vec![0u8; BLOCK_SIZE];
-        block[..bytes.len()].copy_from_slice(&bytes);
-        self.file.write_all(&block)?;
-        self.file.flush()?;
-        self.header_dirty = false;
-        Ok(())
+    // 写入指定块的页头（覆盖块起始的字节）
+    fn write_page_header(&mut self, block_number: u32, header: &PageHeader) -> io::Result<()> {
+        self.seek_to_block(block_number)?;
+        self.file.write_all(&header.to_bytes())
+    }
+
+    // 将内存中的文件头写回块 0
+    fn write_header(&mut self) -> io::Result<()> {
+        self.seek_to_block(HEADER_BLOCK_NUMBER)?;
+        self.file.write_all(&self.header.to_bytes())
+    }
+
+    // 定位到指定块偏移
+    fn seek_to_block(&mut self, block_number: u32) -> io::Result<()> {
+        let offset = block_number as u64 * self.block_size as u64;
+        self.file.seek(SeekFrom::Start(offset)).map(|_| ())
     }
 }
 
+// 当 FileHandle 被 Drop 时，如果文件头脏则尝试持久化
 impl Drop for FileHandle {
     fn drop(&mut self) {
-        if let Err(err) = self.flush_header() {
-            error!("failed to flush header for {:?}: {}", self.path, err);
+        if self.header_dirty {
+            if let Err(err) = self.write_header() {
+                eprintln!(
+                    "警告: 无法持久化文件头到 {}: {}",
+                    self.path.display(),
+                    err
+                );
+            }
         }
+        let _ = self.file.flush();
     }
-}
-
-fn block_offset(block_num: u32) -> u64 {
-    block_num as u64 * BLOCK_SIZE as u64
 }
