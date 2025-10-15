@@ -2,7 +2,7 @@ use std::fs::File;
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 
-use super::fm_bid::BlockId;
+type BlockId = u32;
 use super::fm_file_header::FileHeader;
 use super::fm_page_header::PageHeader;
 
@@ -55,15 +55,15 @@ impl FileHandle {
         }
 
         // 不能将文件头块当成数据块读取
-        if block.number == HEADER_BLOCK_NUMBER {
+        if block == HEADER_BLOCK_NUMBER {
             return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "不能把文件头块作为数据块读取",
             ));
         }
 
-        self.ensure_valid_block(block.number)?;
-        self.seek_to_block(block.number)?;
+        self.ensure_valid_block(block)?;
+        self.seek_to_block(block)?;
         self.file.read_exact(buffer)
     }
 
@@ -81,15 +81,15 @@ impl FileHandle {
         }
 
         // 禁止直接覆盖文件头块（文件头由 FileHandle 管理并在需要时写回）
-        if block.number == HEADER_BLOCK_NUMBER {
+        if block == HEADER_BLOCK_NUMBER {
             return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "不能直接覆盖文件头块",
             ));
         }
 
-        self.ensure_valid_block(block.number)?;
-        self.seek_to_block(block.number)?;
+        self.ensure_valid_block(block)?;
+        self.seek_to_block(block)?;
         self.file.write_all(buffer)
     }
 
@@ -116,7 +116,7 @@ impl FileHandle {
             page_header.prev_free_page = -1;
             self.write_page_header(block_num, &page_header)?;
 
-            Ok(BlockId::new(block_num))
+            Ok(block_num)
         } else {
             // 否则扩展文件，增加一个新块
             let block_num = self.header.block_count;
@@ -129,33 +129,33 @@ impl FileHandle {
             // 将新块初始化为零（包含页头），以保证确定性
             self.zero_block(block_num, page_header)?;
 
-            Ok(BlockId::new(block_num))
+            Ok(block_num)
         }
     }
 
     // 释放一个块并将其插入空闲链表头
     pub fn release_block(&mut self, block: BlockId) -> io::Result<()> {
-        if block.number == HEADER_BLOCK_NUMBER {
+        if block == HEADER_BLOCK_NUMBER {
             return Err(io::Error::new(
                 ErrorKind::InvalidInput,
                 "不能释放文件头块",
             ));
         }
-        self.ensure_valid_block(block.number)?;
+        self.ensure_valid_block(block)?;
 
         // 构造空闲页头并写回磁盘（同时清空页内容）
         let page_header = PageHeader::new_free(self.payload_capacity(), self.header.first_free_hole);
-        self.zero_block(block.number, page_header)?;
+        self.zero_block(block, page_header)?;
 
         // 如果原先有空闲链表头，需要更新其 prev 指向
         if self.header.first_free_hole >= 0 {
             let mut next_header = self.read_page_header(self.header.first_free_hole as u32)?;
-            next_header.prev_free_page = block.number as i32;
+            next_header.prev_free_page = block as i32;
             self.write_page_header(self.header.first_free_hole as u32, &next_header)?;
         }
 
         // 将该释放块设置为新的空闲链表头
-        self.header.first_free_hole = block.number as i32;
+        self.header.first_free_hole = block as i32;
         self.header_dirty = true;
         Ok(())
     }
