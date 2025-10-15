@@ -1,4 +1,7 @@
-pub mod mm_buffer_manager;
+pub mod buffer_manager;
+pub mod page_header;
+pub mod page;
+pub mod page_ops;
 
 /// 导出 BufferManager 和 BlockId
-pub use mm_buffer_manager::{BufferManager, BlockId};
+pub use buffer_manager::{BufferManager, BlockId};

@@ -2,13 +2,13 @@ use std::collections::VecDeque;
 use std::io;
 use crate::fm::{fm_bid, FileHandle};
 
-/// 块标识，仅记录块号
+// 块标识，仅记录块号
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BlockId {
     pub number: u64,
 }
 
-/// 缓冲区管理器：维护固定容量的内存帧，支持加载/缓存/替换/写回等功能
+// 缓冲区管理器：维护固定容量的内存帧，支持加载/缓存/替换/写回等功能
 pub struct BufferManager {
     pub(crate) handle: FileHandle,            // 与磁盘交互的文件句柄
     capacity: usize,               // 缓冲区容量（帧数）
@@ -17,7 +17,7 @@ pub struct BufferManager {
     lru_list: VecDeque<usize>,     // LRU 队列：存储帧索引，队首为最近最少使用
 }
 
-/// 缓冲帧：记录块信息、数据、脏标记和 pin 计数
+// 缓冲帧：记录块信息、数据、脏标记和 pin 计数
 #[derive(Clone)]
 struct Frame {
     block_id: BlockId,
@@ -27,7 +27,7 @@ struct Frame {
 }
 
 impl BufferManager {
-    /// 创建新的缓冲区管理器，传入已有的 FileHandle 和帧数容量
+    // 创建新的缓冲区管理器，传入已有的 FileHandle 和帧数容量
     pub fn new(handle: FileHandle, capacity: usize) -> Self {
         let block_size = handle.block_size();
         BufferManager {
@@ -39,9 +39,9 @@ impl BufferManager {
         }
     }
 
-    /// 获取指定块的数据引用
-    /// - 如果已在缓冲区中命中，则直接返回并 pin
-    /// - 否则加载块到一个空闲帧或替换最久未使用且未被 pin 的帧
+    // 获取指定块的数据引用
+    // - 如果已在缓冲区中命中，则直接返回并 pin
+    // - 否则加载块到一个空闲帧或替换最久未使用且未被 pin 的帧
     pub fn fetch(&mut self, block_id: BlockId) -> io::Result<&mut [u8]> {
         // 1. 查找命中
         if let Some(idx) = self.find_frame(block_id) {
@@ -95,7 +95,7 @@ impl BufferManager {
         Ok(&mut self.frames[idx].as_mut().unwrap().data[..])
     }
 
-    /// 解除 pin，允许块被替换
+    // 解除 pin，允许块被替换
     pub fn unpin(&mut self, block_id: BlockId) {
         if let Some(idx) = self.find_frame(block_id) {
             if let Some(frame) = &mut self.frames[idx] {
@@ -106,7 +106,7 @@ impl BufferManager {
         }
     }
 
-    /// 标记缓冲区内块为脏页，下次替换或 flush 时写回
+    // 标记缓冲区内块为脏页，下次替换或 flush 时写回
     pub fn mark_dirty(&mut self, block_id: BlockId) {
         if let Some(idx) = self.find_frame(block_id) {
             if let Some(frame) = &mut self.frames[idx] {
@@ -115,7 +115,7 @@ impl BufferManager {
         }
     }
 
-    /// 刷写所有脏页到磁盘，并调用底层 FileHandle flush
+    // 刷写所有脏页到磁盘，并调用底层 FileHandle flush
     pub fn flush_all(&mut self) -> io::Result<()> {
         for opt in &mut self.frames {
             if let Some(frame) = opt {
@@ -130,14 +130,14 @@ impl BufferManager {
         Ok(())
     }
 
-    /// 内部：查找指定块对应的帧索引
+    // 内部：查找指定块对应的帧索引
     fn find_frame(&self, block_id: BlockId) -> Option<usize> {
         self.frames.iter().position(|opt| {
             opt.as_ref().map_or(false, |frame| frame.block_id == block_id)
         })
     }
 
-    /// 内部：在 LRU 队列中更新指定帧为最近使用
+    // 内部：在 LRU 队列中更新指定帧为最近使用
     fn touch(&mut self, idx: usize) {
         if let Some(pos) = self.lru_list.iter().position(|&x| x == idx) {
             self.lru_list.remove(pos);
