@@ -37,10 +37,7 @@ impl PageHeader {
     // 从小端字节数组读取页头
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         if bytes.len() < Self::BYTE_SIZE {
-            return Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "页头缓冲区太小",
-            ));
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "页头缓冲区太小"));
         }
 
         let next_free_page = i32::from_le_bytes(bytes[0..4].try_into().unwrap());

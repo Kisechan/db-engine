@@ -14,8 +14,10 @@ impl PageCompact for Page {
         let mut new_slots = Vec::new();
         // 遍历旧 slot
         for &(off, len) in &self.slots {
-            if len == 0 { continue; } // 跳过空槽
-            // 计算旧数据区相对于 data Vec 的偏移
+            if len == 0 {
+                continue;
+            } // 跳过空槽
+              // 计算旧数据区相对于 data Vec 的偏移
             let start = (off as usize).saturating_sub(PageHeader::SIZE);
             let end = start + len as usize;
             // 新槽偏移 = header 后 + new_data 长度

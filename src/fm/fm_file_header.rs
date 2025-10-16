@@ -31,10 +31,7 @@ impl FileHeader {
     // 从小端字节序反序列化
     pub fn from_bytes(bytes: &[u8]) -> io::Result<Self> {
         if bytes.len() < Self::BYTE_SIZE {
-            return Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "文件头缓冲区太小",
-            ));
+            return Err(io::Error::new(ErrorKind::UnexpectedEof, "文件头缓冲区太小"));
         }
 
         let block_count = u32::from_le_bytes(bytes[0..4].try_into().unwrap());

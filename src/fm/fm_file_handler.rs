@@ -136,15 +136,13 @@ impl FileHandle {
     // 释放一个块并将其插入空闲链表头
     pub fn release_block(&mut self, block: BlockId) -> io::Result<()> {
         if block == HEADER_BLOCK_NUMBER {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                "不能释放文件头块",
-            ));
+            return Err(io::Error::new(ErrorKind::InvalidInput, "不能释放文件头块"));
         }
         self.ensure_valid_block(block)?;
 
         // 构造空闲页头并写回磁盘（同时清空页内容）
-        let page_header = PageHeader::new_free(self.payload_capacity(), self.header.first_free_hole);
+        let page_header =
+            PageHeader::new_free(self.payload_capacity(), self.header.first_free_hole);
         self.zero_block(block, page_header)?;
 
         // 如果原先有空闲链表头，需要更新其 prev 指向
@@ -245,11 +243,7 @@ impl Drop for FileHandle {
     fn drop(&mut self) {
         if self.header_dirty {
             if let Err(err) = self.write_header() {
-                eprintln!(
-                    "警告: 无法持久化文件头到 {}: {}",
-                    self.path.display(),
-                    err
-                );
+                eprintln!("警告: 无法持久化文件头到 {}: {}", self.path.display(), err);
             }
         }
         let _ = self.file.flush();

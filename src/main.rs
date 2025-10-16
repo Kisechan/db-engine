@@ -1,11 +1,11 @@
 mod fm;
 mod mm;
 
+use fm::{FileManager, FileManagerConfig};
+use mm::BufferManager;
 use std::convert::TryInto;
 use std::error::Error;
 use std::path::PathBuf;
-use mm::BufferManager;
-use fm::{FileManager, FileManagerConfig};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // 初始化 FileManager

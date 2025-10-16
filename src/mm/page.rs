@@ -19,7 +19,10 @@ impl Page {
         let slot_count = header.slot_count as usize;
         let slot_dir_size = slot_count * 4;
         if page_size < PageHeader::SIZE + slot_dir_size {
-            return Err(io::Error::new(ErrorKind::InvalidData, "frame too small for slots"));
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "frame too small for slots",
+            ));
         }
         // 解析槽目录（位于页末）
         let mut slots = Vec::with_capacity(slot_count);
@@ -33,12 +36,19 @@ impl Page {
         // 解析数据区
         let data_end = header.free_offset as usize;
         if data_end < PageHeader::SIZE || data_end > page_size - slot_dir_size {
-            return Err(io::Error::new(ErrorKind::InvalidData, "invalid free_offset"));
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "invalid free_offset",
+            ));
         }
         let data_len = data_end - PageHeader::SIZE;
         let mut data = vec![0u8; data_len];
         data.copy_from_slice(&frame[PageHeader::SIZE..data_end]);
-        Ok(Page { header, data, slots })
+        Ok(Page {
+            header,
+            data,
+            slots,
+        })
     }
 
     /// 将 Page 序列化并写入 frame
@@ -48,7 +58,10 @@ impl Page {
         let slot_dir_size = slot_count * 4;
         // 检查 frame 空间
         if page_size < PageHeader::SIZE + self.data.len() + slot_dir_size {
-            return Err(io::Error::new(ErrorKind::UnexpectedEof, "frame too small to flush page"));
+            return Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "frame too small to flush page",
+            ));
         }
         // 更新并写入页头
         let mut hdr = self.header.clone();

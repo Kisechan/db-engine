@@ -1,5 +1,5 @@
-use std::io::{self, ErrorKind};
 use crate::mm::page::Page;
+use std::io::{self, ErrorKind};
 
 /// 在页面上操作记录的接口
 pub trait PageOps {
@@ -18,7 +18,10 @@ impl PageOps for Page {
         let slot_entry_size = 4u16;
         // 检查剩余空间
         if self.header.free_bytes < data_len + slot_entry_size {
-            return Err(io::Error::new(ErrorKind::Other, "页面空间不足，无法插入记录"));
+            return Err(io::Error::new(
+                ErrorKind::Other,
+                "页面空间不足，无法插入记录",
+            ));
         }
         // 计算记录写入偏移，相对于页面起始
         let off = self.header.free_offset;
