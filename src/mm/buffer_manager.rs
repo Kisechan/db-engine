@@ -1,9 +1,12 @@
-use crate::fm::FileHandle;
-use crate::mm::page_guard::PageGuard;
-use crate::mm::page_header::PageHeader;
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::io;
 type BlockId = u32;
+
+use crate::fm::FileHandle;
+use crate::mm::page_guard::PageGuard;
+use crate::mm::page_header::PageHeader;
+
 // 缓冲区管理器：维护固定容量的内存帧，支持加载/缓存/替换/写回等功能
 pub struct BufferManager {
     pub handle: FileHandle,       // 与磁盘交互的文件句柄
@@ -12,6 +15,7 @@ pub struct BufferManager {
     frames: Vec<Option<Frame>>,   // 每个槽位存放一个 Frame 或空
     lru_list: VecDeque<usize>,    // LRU 队列：存储帧索引，队首为最近最少使用
     free_list: VecDeque<BlockId>, // 空闲数据页列表
+    map: HashMap<BlockId, usize>, // BlockId -> frames 索引的快速映射
 }
 
 // 缓冲帧：记录块信息、数据、脏标记和 pin 计数
@@ -34,6 +38,7 @@ impl BufferManager {
             frames: vec![None; capacity],
             lru_list: VecDeque::new(),
             free_list: VecDeque::new(),
+            map: HashMap::new(),
         }
     }
 
@@ -47,6 +52,21 @@ impl BufferManager {
             // 增加 pin 计数
             if let Some(frame) = &mut self.frames[idx] {
                 frame.pin_count += 1;
+            }
+            // 更新 LRU：标记为最近使用
+            self.touch(idx);
+            // 构造 PageGuard 并返回
+            let data_slice = &mut self.frames[idx].as_mut().unwrap().data[..];
+            let ptr = data_slice.as_mut_ptr();
+            let len = data_slice.len();
+            let mgr_ptr = self as *mut Self;
+            return Ok(PageGuard::new(mgr_ptr, block_id, ptr, len));
+        }
+        // 1. 查找命中（使用 map 做 O(1) 查找）
+        if let Some(&idx) = self.map.get(&block_id) {
+            // 增加 pin 计数
+            if let Some(frame) = &mut self.frames[idx] {
+                frame.pin_count = 1;
             }
             // 更新 LRU：标记为最近使用
             self.touch(idx);
@@ -76,12 +96,15 @@ impl BufferManager {
                 self.lru_list.push_back(x);
             }
             let victim_idx = *self.lru_list.front().expect("No frame to replace");
-            // 如有脏页，写回磁盘
-            if let Some(frame) = &mut self.frames[victim_idx] {
-                if frame.dirty {
+            // 如有脏页，写回磁盘，并从 map 中移除旧映射
+            if let Some(old_frame) = &mut self.frames[victim_idx] {
+                // 写回脏页（若需要）
+                if old_frame.dirty {
                     self.handle
-                        .write_block(frame.block_id as u32, &frame.data)?;
+                        .write_block(old_frame.block_id, &old_frame.data)?;
                 }
+                // 从 map 中移除旧的 block_id > idx 映射
+                self.map.remove(&old_frame.block_id);
             }
             // 移除旧帧内容
             self.frames[victim_idx] = None;
@@ -99,6 +122,8 @@ impl BufferManager {
             pin_count: 1,
         };
         self.frames[idx] = Some(frame);
+        // 在 map 中登记新的映射
+        self.map.insert(block_id, idx);
         // 将该帧标记为最近使用
         self.lru_list.push_back(idx);
         // 构造 PageGuard
@@ -106,7 +131,13 @@ impl BufferManager {
         let ptr = data_slice.as_mut_ptr();
         let len = data_slice.len();
         let mgr_ptr = self as *mut Self;
-        Ok(PageGuard::new(mgr_ptr, block_id, ptr, len))
+        Ok(PageGuard {
+            mgr: mgr_ptr,
+            block_id,
+            data_ptr: ptr,
+            len,
+            _marker: std::marker::PhantomData,
+        })
     }
 
     // 解除 pin，允许块被替换
@@ -168,6 +199,14 @@ impl BufferManager {
                 self.lru_list.remove(pos);
             }
         }
+        if let Some(&idx) = self.map.get(&block_id) {
+            self.frames[idx] = None;
+            if let Some(pos) = self.lru_list.iter().position(|&x| x == idx) {
+                self.lru_list.remove(pos);
+            }
+            // 从 map 中移除映射
+            self.map.remove(&block_id);
+        }
         self.free_list.push_back(block_id);
         Ok(())
     }
@@ -177,7 +216,9 @@ impl BufferManager {
         self.frames.iter().position(|opt| {
             opt.as_ref()
                 .map_or(false, |frame| frame.block_id == block_id)
-        })
+        });
+        // 使用 map 做 O(1) 查找
+        self.map.get(&block_id).cloned()
     }
 
     // 内部：在 LRU 队列中更新指定帧为最近使用

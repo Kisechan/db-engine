@@ -5,10 +5,10 @@ type BlockId = u32;
 /// PageGuard 在构造时 pin 一个页面，Drop 时自动 unpin
 pub struct PageGuard<'a> {
     pub(crate) mgr: *mut BufferManager,
-    block_id: BlockId,
-    data_ptr: *mut u8,
-    len: usize,
-    _marker: PhantomData<&'a mut [u8]>,
+    pub block_id: BlockId,
+    pub data_ptr: *mut u8,
+    pub len: usize,
+    pub _marker: PhantomData<&'a mut [u8]>,
 }
 
 impl<'a> PageGuard<'a> {
