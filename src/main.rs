@@ -1,16 +1,16 @@
 mod fm;
 mod mm;
+mod rm;
+mod test;
 
 use std::convert::TryInto;
 use std::error::Error;
-use std::path::PathBuf;
-
-use fm::{FileManager, FileManagerConfig};
 use mm::page::Page;
 use mm::page_compact::PageCompact;
 use mm::page_header::PageHeader;
 use mm::page_ops::PageOps;
 use mm::BufferManager;
+use test::test1;
 
 // 测试页面级操作：PageHeader、插入/读取/删除、compact、序列化/反序列化
 fn test_page_ops(page_size: usize) -> Result<(), Box<dyn Error>> {
@@ -134,27 +134,8 @@ fn test_buffer_manager(handle: fm::FileHandle) -> Result<(), Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // 初始化 FileManager
-    let fm_config = FileManagerConfig::default();
-    let file_manager = FileManager::new(fm_config);
-    let data_dir = PathBuf::from("data");
-    file_manager.create_dir(&data_dir)?;
-    let table_path = data_dir.join("example.tbl");
-    if !table_path.exists() {
-        file_manager.create_table_file(&table_path)?;
-    }
-    println!("初始化 FileManager 成功");
-    println!("文件路径: {:?}", table_path);
 
-    // 打开文件句柄
-    let handle = file_manager.open_file(&table_path)?;
-    let page_size = handle.block_size();
-
-    // 先运行 Page 层测试（不依赖 FileHandle）
-    test_page_ops(page_size)?;
-
-    // 再运行 BufferManager 测试（会消费 FileHandle）
-    test_buffer_manager(handle)?;
-
+    println!(">>> 开始 Record Manager 初始化测试");
+    test1()?;
     Ok(())
 }
