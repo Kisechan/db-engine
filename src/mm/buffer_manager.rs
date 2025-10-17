@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::io;
-type BlockId = u32;
 
 use crate::fm::FileHandle;
 use crate::mm::page_guard::PageGuard;
 use crate::mm::page_header::PageHeader;
+
+type BlockId = u32;
 
 // 缓冲区管理器：维护固定容量的内存帧，支持加载/缓存/替换/写回等功能
 pub struct BufferManager {
@@ -227,5 +227,183 @@ impl BufferManager {
             self.lru_list.remove(pos);
         }
         self.lru_list.push_back(idx);
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub enum ReplacementPolicy {
+    LRU,
+    CLOCK,
+}
+
+// 通用缓存条目（用于查询计划、数据字典、日志缓存）
+pub struct CacheEntry<T> {
+    pub key: String,
+    pub value: T,
+    // 用于 CLOCK 算法
+    pub used: bool,
+}
+
+// 通用缓存，支持 LRU 与 CLOCK 替换算法
+pub struct Cache<T> {
+    capacity: usize,
+    policy: ReplacementPolicy,
+    map: HashMap<String, CacheEntry<T>>,
+    // LRU 队列：队头为最久未使用
+    lru: VecDeque<String>,
+    // CLOCK 环：维护条目 key 的列表
+    clock: Vec<String>,
+    clock_hand: usize,
+}
+
+impl<T> Cache<T> {
+    pub fn new(capacity: usize, policy: ReplacementPolicy) -> Self {
+        Cache {
+            capacity,
+            policy,
+            map: HashMap::new(),
+            lru: VecDeque::new(),
+            clock: Vec::new(),
+            clock_hand: 0,
+        }
+    }
+
+    pub fn insert(&mut self, key: String, value: T) {
+        if self.map.contains_key(&key) {
+            self.update_usage(&key);
+            if let Some(entry) = self.map.get_mut(&key) {
+                entry.value = value;
+            }
+            return;
+        }
+        if self.map.len() >= self.capacity {
+            match self.policy {
+                ReplacementPolicy::LRU => self.evict_lru(),
+                ReplacementPolicy::CLOCK => self.evict_clock(),
+            }
+        }
+        let entry = CacheEntry {
+            key: key.clone(),
+            value,
+            used: true,
+        };
+        self.map.insert(key.clone(), entry);
+        self.lru.push_back(key.clone());
+        self.clock.push(key);
+    }
+
+    pub fn get(&mut self, key: &str) -> Option<&T> {
+        let found = self.map.contains_key(key);
+        if found {
+            if let Some(entry) = self.map.get_mut(key) {
+                entry.used = true;
+            }
+            self.update_usage(key);
+            return self.map.get(key).map(|entry| &entry.value);
+        }
+        None
+    }
+
+    fn update_usage(&mut self, key: &str) {
+        if let Some(pos) = self.lru.iter().position(|k| k == key) {
+            self.lru.remove(pos);
+            self.lru.push_back(key.to_string());
+        }
+    }
+
+    fn evict_lru(&mut self) {
+        if let Some(evict_key) = self.lru.pop_front() {
+            self.map.remove(&evict_key);
+            if let Some(pos) = self.clock.iter().position(|k| k == &evict_key) {
+                self.clock.remove(pos);
+                if self.clock_hand >= self.clock.len() && !self.clock.is_empty() {
+                    self.clock_hand = 0;
+                }
+            }
+        }
+    }
+
+    fn evict_clock(&mut self) {
+        if self.clock.is_empty() {
+            return;
+        }
+        for _ in 0..self.clock.len() * 2 {
+            let key = &self.clock[self.clock_hand];
+            if let Some(entry) = self.map.get_mut(key) {
+                if entry.used {
+                    entry.used = false;
+                } else {
+                    let evict_key = key.clone();
+                    self.map.remove(&evict_key);
+                    self.clock.remove(self.clock_hand);
+                    if self.clock_hand >= self.clock.len() && !self.clock.is_empty() {
+                        self.clock_hand = 0;
+                    }
+                    if let Some(pos) = self.lru.iter().position(|k| k == &evict_key) {
+                        self.lru.remove(pos);
+                    }
+                    return;
+                }
+            }
+            self.clock_hand = (self.clock_hand + 1) % self.clock.len();
+        }
+    }
+}
+
+// 定义专用缓存类型：
+// 查询计划缓存，保存 SQL（或计划）字符串
+pub type QueryPlanCache = Cache<String>;
+// 数据字典缓存，保存字典信息（简单采用字符串表示）
+pub type DictCache = Cache<String>;
+// 日志缓存，保存日志记录，每条为字符串
+pub type LogBuffer = Cache<String>;
+
+/// MemoryManager 综合管理 DBMS 内存空间的划分与页面加载
+/// 划分为：
+///   1. 查询计划缓存
+///   2. 数据字典缓存
+///   3. 数据处理缓存（BufferManager）
+///   4. 日志缓存
+pub struct MemoryManager {
+    pub query_cache: QueryPlanCache,
+    pub dict_cache: DictCache,
+    pub log_buffer: LogBuffer,
+    pub data_buffer: BufferManager,
+}
+
+impl MemoryManager {
+    // 构造 MemoryManager，传入 FileHandle 用于数据处理缓存，同时设置各缓存容量和替换策略
+    pub fn new(
+        handle: FileHandle,
+        buf_capacity: usize,
+        query_cap: usize,
+        dict_cap: usize,
+        log_cap: usize,
+        policy: ReplacementPolicy,
+    ) -> Self {
+        MemoryManager {
+            query_cache: Cache::new(query_cap, policy.clone()),
+            dict_cache: Cache::new(dict_cap, policy.clone()),
+            log_buffer: Cache::new(log_cap, policy.clone()),
+            data_buffer: BufferManager::new(handle, buf_capacity),
+        }
+    }
+
+    // 访问存储在缓冲池中的页面
+    pub fn fetch_page(&mut self, block_id: u32) -> io::Result<PageGuard> {
+        self.data_buffer.fetch(block_id)
+    }
+
+    // 从磁盘加载一个页面到空槽（若存在空槽则自动加载）
+    pub fn load_page_to_empty_slot(&mut self, block_id: u32) -> io::Result<PageGuard> {
+        // BufferManager.fetch 内部会优先使用空闲帧加载页面
+        self.data_buffer.fetch(block_id)
+    }
+
+    // 将页面从磁盘加载到牺牲者缓冲池插槽（触发替换算法）
+    pub fn load_page_to_victim_slot(&mut self, block_id: u32) -> io::Result<PageGuard> {
+        // 当不存在空闲帧时，BufferManager.fetch 会通过 LRU（或 CLOCK）选择牺牲者插槽
+        self.data_buffer.fetch(block_id)
     }
 }

@@ -2,7 +2,7 @@ use crate::mm::BufferManager;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 type BlockId = u32;
-/// PageGuard 在构造时 pin 一个页面，Drop 时自动 unpin
+// PageGuard 在构造时 pin 一个页面，Drop 时自动 unpin
 pub struct PageGuard<'a> {
     pub(crate) mgr: *mut BufferManager,
     pub block_id: BlockId,
@@ -12,7 +12,7 @@ pub struct PageGuard<'a> {
 }
 
 impl<'a> PageGuard<'a> {
-    /// 从 BufferManager 的 fetch 构造 PageGuard
+    // 从 BufferManager 的 fetch 构造 PageGuard
     pub(crate) fn new(
         mgr: *mut BufferManager,
         block_id: BlockId,
