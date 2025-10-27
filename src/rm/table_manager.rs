@@ -1,0 +1,127 @@
+use std::collections::HashMap;
+use crate::rm::types::TableSchema;
+use crate::rm::catalog_manager::CatalogManager;
+use crate::rm::table_handler::TableHandler;
+use crate::fm::file_manager::FileManager;
+use crate::fm::file_handler::FileHandler;
+use crate::fm::file_header::FileHeader;
+
+// 管理所有打开的表
+pub struct TableManager {
+    // catalog 管理器（持有或引用）
+    pub catalog: CatalogManager,
+
+    // 已打开表：表名 -> TableHandler
+    pub open_tables: HashMap<String, TableHandler>,
+}
+
+impl TableManager {
+    pub fn new(catalog: CatalogManager) -> Result<Self, String> {
+        Ok(TableManager {
+            catalog,
+            open_tables: HashMap::new(),
+        })
+    }
+
+    // 创建表：注册 schema 并创建数据文件
+    pub fn create_table(&mut self, schema: TableSchema) -> Result<(), String> {
+        let table_name = schema.table_name.clone();
+
+        // 检查表是否已存在
+        if self.catalog.table_exists(&table_name) {
+            return Err(format!("Table '{}' already exists", table_name));
+        }
+
+        // 向 catalog 注册 schema
+        self.catalog.create_table(schema)?;
+
+        // 创建数据文件
+        let file_path = format!("{}.tbl", table_name);
+        crate::common::disk_manager::DiskManager::create_file(&file_path)
+            .map_err(|e| format!("Failed to create data file for table '{}': {}", table_name, e))?;
+
+        // 初始化 FileHeader 并写入第0页
+        let default_header = FileHeader::default();
+        let file_handler = FileHandler::new(file_path.clone(), default_header);
+        file_handler.flush_header()
+            .map_err(|e| format!("Failed to flush header for table '{}': {}", table_name, e))?;
+
+        Ok(())
+    }
+
+    // 打开表（返回一个可操作的 TableHandler）
+    pub fn open_table(&mut self, table_name: &str) -> Result<(), String> {
+        // 检查表是否已打开
+        if self.open_tables.contains_key(table_name) {
+            return Ok(());
+        }
+
+        // 检查表是否在 catalog 中存在
+        let schema = self.catalog.get_table(table_name)
+            .ok_or(format!("Table '{}' not found in catalog", table_name))?
+            .clone();
+
+        // 构造数据文件路径
+        let file_path = format!("{}.tbl", table_name);
+
+        // 加载文件头
+        let file_header = FileHandler::load_header(&file_path)
+            .map_err(|e| format!("Failed to load header for table '{}': {}", table_name, e))?;
+
+        // 创建 FileHandler
+        let file_handler = FileHandler::new(file_path, file_header);
+
+        // 创建 TableHandler 并加入 open_tables
+        let table_handler = TableHandler::new(table_name.to_string(), schema, file_handler);
+        self.open_tables.insert(table_name.to_string(), table_handler);
+
+        Ok(())
+    }
+
+    // 关闭表（flush + remove）
+    pub fn close_table(&mut self, table_name: &str) -> Result<(), String> {
+        if let Some(mut th) = self.open_tables.remove(table_name) {
+            th.flush()
+                .map_err(|e| format!("Failed to flush table '{}': {}", table_name, e))?;
+        }
+        Ok(())
+    }
+
+    // 获取可变的 TableHandler 引用（必须先 open_table）
+    pub fn get_table_handler_mut(&mut self, table_name: &str) -> Option<&mut TableHandler> {
+        self.open_tables.get_mut(table_name)
+    }
+
+    // 获取不可变的 TableHandler 引用
+    pub fn get_table_handler(&self, table_name: &str) -> Option<&TableHandler> {
+        self.open_tables.get(table_name)
+    }
+
+    // 获取所有已打开的表名
+    pub fn get_open_tables(&self) -> Vec<String> {
+        self.open_tables.keys().cloned().collect()
+    }
+
+    // 删除表（从 catalog 和磁盘）
+    pub fn drop_table(&mut self, table_name: &str) -> Result<(), String> {
+        // 检查表是否已打开，如果已打开则先关闭
+        if self.open_tables.contains_key(table_name) {
+            self.close_table(table_name)?;
+        }
+
+        // 从 catalog 移除
+        self.catalog.drop_table(table_name)?;
+
+        // 删除数据文件
+        let file_path = format!("{}.tbl", table_name);
+        std::fs::remove_file(&file_path)
+            .map_err(|e| format!("Failed to delete data file for table '{}': {}", table_name, e))?;
+
+        Ok(())
+    }
+
+    // 检查表是否已打开
+    pub fn is_table_open(&self, table_name: &str) -> bool {
+        self.open_tables.contains_key(table_name)
+    }
+}

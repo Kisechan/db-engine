@@ -43,29 +43,29 @@ impl<'a> PageHandler<'a> {
     }
 
     // 读取页头
-    fn read_header(&self) -> Result<PageHeader, String> {
+    pub fn read_header(&self) -> Result<PageHeader, String> {
         PageHeader::deserialize(&self.data[0..PageHeader::SIZE])
     }
 
     // 写入页头
-    fn write_header(&mut self, header: PageHeader) -> Result<(), String> {
+    pub fn write_header(&mut self, header: PageHeader) -> Result<(), String> {
         let serialized = header.serialize();
         self.data[0..PageHeader::SIZE].copy_from_slice(&serialized);
         Ok(())
     }
 
     // 计算 slot table 的起始位置（紧跟在页头后）
-    fn slot_table_start(&self) -> usize {
+    pub fn slot_table_start(&self) -> usize {
         PageHeader::SIZE
     }
 
     // 计算 slot table 的结束位置
-    fn slot_table_end(&self, slot_count: u16) -> usize {
+    pub fn slot_table_end(&self, slot_count: u16) -> usize {
         self.slot_table_start() + (slot_count as usize) * SlotEntry::SIZE
     }
 
     // 读取指定 slot
-    fn read_slot(&self, slot_id: u16) -> Result<SlotEntry, String> {
+    pub fn read_slot(&self, slot_id: u16) -> Result<SlotEntry, String> {
         let offset = self.slot_table_start() + (slot_id as usize) * SlotEntry::SIZE;
         if offset + SlotEntry::SIZE > PAGE_SIZE {
             return Err("Slot index out of bounds".to_string());
@@ -74,7 +74,7 @@ impl<'a> PageHandler<'a> {
     }
 
     // 写入指定 slot
-    fn write_slot(&mut self, slot_id: u16, slot: SlotEntry) -> Result<(), String> {
+    pub fn write_slot(&mut self, slot_id: u16, slot: SlotEntry) -> Result<(), String> {
         let offset = self.slot_table_start() + (slot_id as usize) * SlotEntry::SIZE;
         if offset + SlotEntry::SIZE > PAGE_SIZE {
             return Err("Slot index out of bounds".to_string());

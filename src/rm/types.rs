@@ -1,16 +1,30 @@
-// 记录标识符：指定页号(block)和槽(slot)
-pub type Rid = (u32, u16);
+use serde::{Serialize, Deserialize};
+use crate::common::types::PageId;
 
-// 记录插入时的简单容器（列名-值）
-pub struct RecAux {
-    pub cols: Vec<(String, Vec<u8>)>,
+// 数据类型枚举（可扩展）
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum DataType {
+    Int32,
+    // 定长字符串（fixed length）
+    Char(usize),
+    // 变长字符串（VARCHAR）
+    VarChar,
+    // 可以继续添加 Date/Float 等类型
 }
 
-impl RecAux {
-    pub fn new() -> Self {
-        RecAux { cols: Vec::new() }
-    }
-    pub fn push(&mut self, col: impl Into<String>, val: Vec<u8>) {
-        self.cols.push((col.into(), val));
-    }
+// 列定义
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct ColumnDef {
+    pub name: String,
+    pub data_type: DataType,
+    pub nullable: bool,
+}
+
+// 表模式（Schema）
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TableSchema {
+    pub table_name: String,
+    pub columns: Vec<ColumnDef>,
+    // 初始/主数据页（可为空），TableHandler 维护更多 data pages 列表
+    pub root_pages: Vec<PageId>,
 }

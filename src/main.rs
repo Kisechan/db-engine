@@ -1,6 +1,7 @@
 mod fm;
 mod mm;
 mod rm;
+mod pm;
 mod test;
 mod common;
 
