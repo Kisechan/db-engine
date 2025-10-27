@@ -1,231 +1,117 @@
-use std::collections::{HashMap, VecDeque};
-use std::io;
+use crate::common::types::PageId;
+use crate::common::disk_manager::DiskManager;
+use super::frame::Frame;
+use super::replacer::{Replacer, ClockReplacer};
+use std::collections::HashMap;
 
-use crate::fm::FileHandler;
-use crate::mm::page_guard::PageGuard;
-use crate::mm::page_header::PageHeader;
+const PAGE_SIZE: usize = 4096;
 
-type BlockId = u32;
-
-// 缓冲区管理器：维护固定容量的内存帧，支持加载/缓存/替换/写回等功能
+// BufferManager：负责页缓存、替换、脏页管理
 pub struct BufferManager {
-    pub handle: FileHandler,       // 与磁盘交互的文件句柄
-    capacity: usize,              // 缓冲区容量（帧数）
-    block_size: usize,            // 每块大小（字节）
-    frames: Vec<Option<Frame>>,   // 每个槽位存放一个 Frame 或空
-    lru_list: VecDeque<usize>,    // LRU 队列：存储帧索引，队首为最近最少使用
-    free_list: VecDeque<BlockId>, // 空闲数据页列表
-    map: HashMap<BlockId, usize>, // BlockId -> frames 索引的快速映射
-}
-
-// 缓冲帧：记录块信息、数据、脏标记和 pin 计数
-#[derive(Clone)]
-struct Frame {
-    block_id: BlockId,
-    data: Vec<u8>,
-    dirty: bool,
-    pin_count: usize,
+    frames: Vec<Frame>,                   // 缓冲池
+    page_table: HashMap<PageId, usize>,   // 页号 -> 帧号的映射
+    replacer: ClockReplacer,              // 页替换器
+    file_path: String,                    // 数据文件路径
 }
 
 impl BufferManager {
-    // 创建新的缓冲区管理器，传入已有的 FileHandler 和帧数容量
-    pub fn new(handle: FileHandler, capacity: usize) -> Self {
-        let block_size = handle.block_size();
+    pub fn new(pool_size: usize, file_path: String) -> Self {
+        let mut frames = Vec::new();
+        for _ in 0..pool_size {
+            frames.push(Frame::new(PAGE_SIZE));
+        }
+
         BufferManager {
-            handle,
-            capacity,
-            block_size,
-            frames: vec![None; capacity],
-            lru_list: VecDeque::new(),
-            free_list: VecDeque::new(),
-            map: HashMap::new(),
+            frames,
+            page_table: HashMap::new(),
+            replacer: ClockReplacer::new(pool_size),
+            file_path,
         }
     }
 
-    // 获取指定块的数据引用
-    // - 如果已在缓冲区中命中，则直接返回并 pin
-    // - 否则加载块到一个空闲帧或替换最久未使用且未被 pin 的帧
-    // fetch 返回带自动 unpin 的 PageGuard
-    pub fn fetch(&'_ mut self, block_id: BlockId) -> io::Result<PageGuard<'_>> {
-        // 1. 查找命中
-        if let Some(idx) = self.find_frame(block_id) {
-            // 增加 pin 计数
-            if let Some(frame) = &mut self.frames[idx] {
-                frame.pin_count += 1;
-            }
-            // 更新 LRU：标记为最近使用
-            self.touch(idx);
-            // 构造 PageGuard 并返回
-            let data_slice = &mut self.frames[idx].as_mut().unwrap().data[..];
-            let ptr = data_slice.as_mut_ptr();
-            let len = data_slice.len();
-            let mgr_ptr = self as *mut Self;
-            return Ok(PageGuard::new(mgr_ptr, block_id, ptr, len));
+    // 获取页数据：查找 -> 加载 -> pin
+    pub fn fetch_page(&mut self, page_id: PageId) -> Result<&mut [u8], String> {
+        // 查找是否已存在
+        if let Some(&frame_id) = self.page_table.get(&page_id) {
+            // 页已在缓冲中，增加 pin 计数
+            self.frames[frame_id].pin_count += 1;
+            self.replacer.pin(frame_id);
+            return Ok(&mut self.frames[frame_id].data);
         }
-        // 1. 查找命中（使用 map 做 O(1) 查找）
-        if let Some(&idx) = self.map.get(&block_id) {
-            // 增加 pin 计数
-            if let Some(frame) = &mut self.frames[idx] {
-                frame.pin_count = 1;
-            }
-            // 更新 LRU：标记为最近使用
-            self.touch(idx);
-            // 构造 PageGuard 并返回
-            let data_slice = &mut self.frames[idx].as_mut().unwrap().data[..];
-            let ptr = data_slice.as_mut_ptr();
-            let len = data_slice.len();
-            let mgr_ptr = self as *mut Self;
-            return Ok(PageGuard::new(mgr_ptr, block_id, ptr, len));
+
+        // 页不存在，选择受害者
+        let victim_frame_id = self.replacer.pick_victim()
+            .ok_or("No available frame in buffer pool".to_string())?;
+
+        let victim_frame = &mut self.frames[victim_frame_id];
+
+        // 如果受害者页是 dirty，写回磁盘
+        if victim_frame.is_dirty && victim_frame.page_id != u32::MAX {
+            DiskManager::write_page(&self.file_path, victim_frame.page_id, &victim_frame.data)?;
         }
-        // 2. 未命中：选择空闲帧或替换
-        let idx = if let Some(free_idx) = self.frames.iter().position(|f| f.is_none()) {
-            // 有空闲帧
-            free_idx
+
+        // 从页表移除旧页映射
+        if victim_frame.page_id != u32::MAX {
+            self.page_table.remove(&victim_frame.page_id);
+        }
+
+        // 读入新页内容
+        DiskManager::read_page(&self.file_path, page_id, &mut victim_frame.data)?;
+
+        // 更新帧信息
+        victim_frame.page_id = page_id;
+        victim_frame.pin_count = 1;
+        victim_frame.is_dirty = false;
+
+        // 添加页表映射
+        self.page_table.insert(page_id, victim_frame_id);
+
+        // Pin 该帧
+        self.replacer.pin(victim_frame_id);
+
+        Ok(&mut self.frames[victim_frame_id].data)
+    }
+
+    // 解 pin 页
+    pub fn unpin_page(&mut self, page_id: PageId, is_dirty: bool) -> Result<(), String> {
+        let frame_id = self.page_table.get(&page_id)
+            .ok_or(format!("Page {} not in buffer pool", page_id))?;
+
+        let frame_id = *frame_id;
+        let frame = &mut self.frames[frame_id];
+
+        // pin 计数递减
+        if frame.pin_count > 0 {
+            frame.pin_count -= 1;
         } else {
-            // 全部帧已占用，使用 LRU 算法选出候选
-            // 队首为最近最少使用
-            while let Some(&victim_idx) = self.lru_list.front() {
-                if let Some(frame) = &self.frames[victim_idx] {
-                    // 只有未被 pin（pin_count==0）的帧才可替换
-                    if frame.pin_count == 0 {
-                        break;
-                    }
-                }
-                // 否则移动到队尾，继续寻找
-                let x = self.lru_list.pop_front().unwrap();
-                self.lru_list.push_back(x);
-            }
-            let victim_idx = *self.lru_list.front().expect("No frame to replace");
-            // 如有脏页，写回磁盘，并从 map 中移除旧映射
-            if let Some(old_frame) = &mut self.frames[victim_idx] {
-                // 写回脏页（若需要）
-                if old_frame.dirty {
-                    self.handle
-                        .write_block(old_frame.block_id, &old_frame.data)?;
-                }
-                // 从 map 中移除旧的 block_id > idx 映射
-                self.map.remove(&old_frame.block_id);
-            }
-            // 移除旧帧内容
-            self.frames[victim_idx] = None;
-            victim_idx
-        };
-        // 3. 加载新块数据到选定帧
-        let mut data = vec![0u8; self.block_size];
-        // 从磁盘读取块数据到 buffer
-        self.handle.read_block(block_id, &mut data)?;
-        // 插入新帧并 pin
-        let frame = Frame {
-            block_id,
-            data,
-            dirty: false,
-            pin_count: 1,
-        };
-        self.frames[idx] = Some(frame);
-        // 在 map 中登记新的映射
-        self.map.insert(block_id, idx);
-        // 将该帧标记为最近使用
-        self.lru_list.push_back(idx);
-        // 构造 PageGuard
-        let data_slice = &mut self.frames[idx].as_mut().unwrap().data[..];
-        let ptr = data_slice.as_mut_ptr();
-        let len = data_slice.len();
-        let mgr_ptr = self as *mut Self;
-        Ok(PageGuard {
-            mgr: mgr_ptr,
-            block_id,
-            data_ptr: ptr,
-            len,
-            _marker: std::marker::PhantomData,
-        })
-    }
+            return Err(format!("Pin count underflow for page {}", page_id));
+        }
 
-    // 解除 pin，允许块被替换
-    pub fn unpin(&mut self, block_id: BlockId) {
-        if let Some(idx) = self.find_frame(block_id) {
-            if let Some(frame) = &mut self.frames[idx] {
-                if frame.pin_count > 0 {
-                    frame.pin_count -= 1;
-                }
-            }
+        // 记录 dirty 标记
+        if is_dirty {
+            frame.is_dirty = true;
         }
-    }
 
-    // 标记缓冲区内块为脏页，下次替换或 flush 时写回
-    pub fn mark_dirty(&mut self, block_id: BlockId) {
-        if let Some(idx) = self.find_frame(block_id) {
-            if let Some(frame) = &mut self.frames[idx] {
-                frame.dirty = true;
-            }
+        // 当 pin_count 为 0 时，unpin 该帧
+        if frame.pin_count == 0 {
+            self.replacer.unpin(frame_id);
         }
-    }
 
-    // 刷写所有脏页到磁盘，并调用底层 FileHandler flush
-    pub fn flush_all(&mut self) -> io::Result<()> {
-        for opt in &mut self.frames {
-            if let Some(frame) = opt {
-                if frame.dirty {
-                    self.handle.write_block(frame.block_id, &frame.data)?;
-                    frame.dirty = false;
-                }
-            }
-        }
-        // 刷新文件头元数据
-        self.handle.flush()?;
-        Ok(())
-    }
-    // 分配新数据页，初始化页头并写入磁盘，返回 BlockId
-    pub fn allocate_data_page(&mut self) -> io::Result<BlockId> {
-        let fm_bid = self.handle.allocate_block()?;
-        let bid = fm_bid;
-        // 初始化页面内容：写入空白 header
-        let mut buf = vec![0u8; self.block_size];
-        let header = PageHeader {
-            slot_count: 0,
-            free_offset: PageHeader::SIZE as u16,
-            free_bytes: (self.block_size - PageHeader::SIZE) as u16,
-        };
-        header.to_bytes(&mut buf[..PageHeader::SIZE])?;
-        self.handle.write_block(bid, &buf)?;
-        self.free_list.push_back(bid);
-        Ok(bid)
-    }
-    // 释放数据页，将 BlockId 加入空闲列表
-    pub fn free_page(&mut self, block_id: BlockId) -> io::Result<()> {
-        // 如果在缓冲区中，移除缓存
-        if let Some(idx) = self.find_frame(block_id) {
-            self.frames[idx] = None;
-            if let Some(pos) = self.lru_list.iter().position(|&x| x == idx) {
-                self.lru_list.remove(pos);
-            }
-        }
-        if let Some(&idx) = self.map.get(&block_id) {
-            self.frames[idx] = None;
-            if let Some(pos) = self.lru_list.iter().position(|&x| x == idx) {
-                self.lru_list.remove(pos);
-            }
-            // 从 map 中移除映射
-            self.map.remove(&block_id);
-        }
-        self.free_list.push_back(block_id);
         Ok(())
     }
 
-    // 内部：查找指定块对应的帧索引
-    fn find_frame(&self, block_id: BlockId) -> Option<usize> {
-        self.frames.iter().position(|opt| {
-            opt.as_ref()
-                .map_or(false, |frame| frame.block_id == block_id)
-        });
-        // 使用 map 做 O(1) 查找
-        self.map.get(&block_id).cloned()
+    // 清空缓冲池（关闭数据库时调用）
+    pub fn flush_all(&mut self) -> Result<(), String> {
+        for frame in &self.frames {
+            if frame.is_dirty && frame.page_id != u32::MAX {
+                DiskManager::write_page(&self.file_path, frame.page_id, &frame.data)?;
+            }
+        }
+        Ok(())
     }
 
-    // 内部：在 LRU 队列中更新指定帧为最近使用
-    fn touch(&mut self, idx: usize) {
-        if let Some(pos) = self.lru_list.iter().position(|&x| x == idx) {
-            self.lru_list.remove(pos);
-        }
-        self.lru_list.push_back(idx);
+    // 获取缓冲池大小
+    pub fn get_pool_size(&self) -> usize {
+        self.frames.len()
     }
 }
