@@ -1,7 +1,7 @@
 use crate::common::types::PageId;
 use crate::common::disk_manager::DiskManager;
 use super::frame::Frame;
-use super::replacer::{Replacer, ClockReplacer};
+use super::replacer::{Replacer, LRU};
 use std::collections::HashMap;
 
 const PAGE_SIZE: usize = 4096;
@@ -10,7 +10,7 @@ const PAGE_SIZE: usize = 4096;
 pub struct BufferManager {
     frames: Vec<Frame>,                   // 缓冲池
     page_table: HashMap<PageId, usize>,   // 页号 -> 帧号的映射
-    replacer: ClockReplacer,              // 页替换器
+    replacer: LRU,                        // 页替换器
     file_path: String,                    // 数据文件路径
 }
 
@@ -18,13 +18,14 @@ impl BufferManager {
     pub fn new(pool_size: usize, file_path: String) -> Self {
         let mut frames = Vec::new();
         for _ in 0..pool_size {
+            // pool_size 可指定缓冲池大小
             frames.push(Frame::new(PAGE_SIZE));
         }
 
         BufferManager {
             frames,
             page_table: HashMap::new(),
-            replacer: ClockReplacer::new(pool_size),
+            replacer: LRU::new(pool_size),
             file_path,
         }
     }
