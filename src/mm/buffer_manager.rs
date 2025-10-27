@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io;
 
-use crate::fm::FileHandle;
+use crate::fm::FileHandler;
 use crate::mm::page_guard::PageGuard;
 use crate::mm::page_header::PageHeader;
 
@@ -9,7 +9,7 @@ type BlockId = u32;
 
 // 缓冲区管理器：维护固定容量的内存帧，支持加载/缓存/替换/写回等功能
 pub struct BufferManager {
-    pub handle: FileHandle,       // 与磁盘交互的文件句柄
+    pub handle: FileHandler,       // 与磁盘交互的文件句柄
     capacity: usize,              // 缓冲区容量（帧数）
     block_size: usize,            // 每块大小（字节）
     frames: Vec<Option<Frame>>,   // 每个槽位存放一个 Frame 或空
@@ -28,8 +28,8 @@ struct Frame {
 }
 
 impl BufferManager {
-    // 创建新的缓冲区管理器，传入已有的 FileHandle 和帧数容量
-    pub fn new(handle: FileHandle, capacity: usize) -> Self {
+    // 创建新的缓冲区管理器，传入已有的 FileHandler 和帧数容量
+    pub fn new(handle: FileHandler, capacity: usize) -> Self {
         let block_size = handle.block_size();
         BufferManager {
             handle,
@@ -160,7 +160,7 @@ impl BufferManager {
         }
     }
 
-    // 刷写所有脏页到磁盘，并调用底层 FileHandle flush
+    // 刷写所有脏页到磁盘，并调用底层 FileHandler flush
     pub fn flush_all(&mut self) -> io::Result<()> {
         for opt in &mut self.frames {
             if let Some(frame) = opt {

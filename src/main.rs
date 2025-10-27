@@ -2,6 +2,7 @@ mod fm;
 mod mm;
 mod rm;
 mod test;
+mod common;
 
 use std::convert::TryInto;
 use std::error::Error;
