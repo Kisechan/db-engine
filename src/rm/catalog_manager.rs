@@ -5,7 +5,7 @@ use crate::rm::types::TableSchema;
 use crate::common::disk_manager::DiskManager;
 
 // Catalog 持久化文件名
-const CATALOG_FILE: &str = "catalog.tbl";
+const CATALOG_FILE: &str = "data/catalog.tbl";
 const PAGE_SIZE: usize = 4096;
 
 // 内存 + 持久化的 Catalog 管理器
@@ -22,6 +22,7 @@ impl CatalogManager {
             schemas: HashMap::new(),
         };
         mgr.load_from_disk()?;
+        println!("[CatalogManager] Initialized with {} tables", mgr.schemas.len());
         Ok(mgr)
     }
 
@@ -32,6 +33,7 @@ impl CatalogManager {
             return Err(format!("Table '{}' already exists", name));
         }
         self.schemas.insert(name.clone(), schema);
+        println!("[CatalogManager] Added table '{}' to memory cache", name);
         self.flush_to_disk()
     }
 
@@ -40,6 +42,7 @@ impl CatalogManager {
         if self.schemas.remove(table_name).is_none() {
             return Err(format!("Table '{}' not found", table_name));
         }
+        println!("[CatalogManager] Removed table '{}' from memory cache", table_name);
         self.flush_to_disk()
     }
 
@@ -83,6 +86,8 @@ impl CatalogManager {
         DiskManager::write_page(CATALOG_FILE, 0, &page_data)
             .map_err(|e| format!("Failed to write catalog to disk: {}", e))?;
 
+        println!("[CatalogManager] Flushed {} tables to disk ({} bytes)", 
+            self.schemas.len(), encoded.len());
         Ok(())
     }
 
@@ -90,6 +95,16 @@ impl CatalogManager {
     pub fn load_from_disk(&mut self) -> Result<(), String> {
         // 检查文件是否存在
         if !std::path::Path::new(CATALOG_FILE).exists() {
+            println!("[CatalogManager] Catalog file not found, starting with empty schema");
+            return Ok(());
+        }
+
+        // 检查文件大小
+        let metadata = std::fs::metadata(CATALOG_FILE)
+            .map_err(|e| format!("Failed to get catalog file metadata: {}", e))?;
+
+        if metadata.len() == 0 {
+            println!("[CatalogManager] Catalog file is empty, starting with empty schema");
             return Ok(());
         }
 
@@ -103,6 +118,7 @@ impl CatalogManager {
 
         // 如果页面全为 0，表示 catalog 为空
         if end == 0 {
+            println!("[CatalogManager] Catalog page is empty, starting with empty schema");
             self.schemas = HashMap::new();
             return Ok(());
         }
@@ -112,7 +128,9 @@ impl CatalogManager {
         let schemas: HashMap<String, TableSchema> = bincode::deserialize(bytes)
             .map_err(|e| format!("Failed to deserialize catalog: {}", e))?;
 
+        let table_count = schemas.len();
         self.schemas = schemas;
+        println!("[CatalogManager] Loaded {} tables from disk", table_count);
         Ok(())
     }
 

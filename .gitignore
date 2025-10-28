@@ -3,3 +3,4 @@ ref*
 data
 docs
 **/*.tbl
+**/*.log

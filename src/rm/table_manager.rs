@@ -5,6 +5,7 @@ use crate::rm::table_handler::TableHandler;
 use crate::fm::file_manager::FileManager;
 use crate::fm::file_handler::FileHandler;
 use crate::fm::file_header::FileHeader;
+use crate::common::disk_manager::DiskManager;
 
 // 管理所有打开的表
 pub struct TableManager {
@@ -36,15 +37,21 @@ impl TableManager {
         self.catalog.create_table(schema)?;
 
         // 创建数据文件
-        let file_path = format!("{}.tbl", table_name);
-        crate::common::disk_manager::DiskManager::create_file(&file_path)
+        let file_path = format!("data/{}.tbl", table_name);
+        DiskManager::create_file(&file_path)
             .map_err(|e| format!("Failed to create data file for table '{}': {}", table_name, e))?;
 
-        // 初始化 FileHeader 并写入第0页
-        let default_header = FileHeader::default();
+        // 初始化 FileHeader
+        let mut default_header = FileHeader::default();
+        
+        // 创建文件句柄
         let file_handler = FileHandler::new(file_path.clone(), default_header);
+        
+        // 将文件头写入第0页（非常重要！）
         file_handler.flush_header()
             .map_err(|e| format!("Failed to flush header for table '{}': {}", table_name, e))?;
+
+        println!("[TableManager] Created table file: {} with initialized header", file_path);
 
         Ok(())
     }
@@ -62,18 +69,25 @@ impl TableManager {
             .clone();
 
         // 构造数据文件路径
-        let file_path = format!("{}.tbl", table_name);
+        let file_path = format!("data/{}.tbl", table_name);
+
+        // 检查文件是否存在
+        if !DiskManager::file_exists(&file_path) {
+            return Err(format!("Data file for table '{}' not found at {}", table_name, file_path));
+        }
 
         // 加载文件头
         let file_header = FileHandler::load_header(&file_path)
             .map_err(|e| format!("Failed to load header for table '{}': {}", table_name, e))?;
 
         // 创建 FileHandler
-        let file_handler = FileHandler::new(file_path, file_header);
+        let file_handler = FileHandler::new(file_path.clone(), file_header);
 
         // 创建 TableHandler 并加入 open_tables
         let table_handler = TableHandler::new(table_name.to_string(), schema, file_handler);
         self.open_tables.insert(table_name.to_string(), table_handler);
+
+        println!("[TableManager] Opened table: {}", table_name);
 
         Ok(())
     }
@@ -83,6 +97,7 @@ impl TableManager {
         if let Some(mut th) = self.open_tables.remove(table_name) {
             th.flush()
                 .map_err(|e| format!("Failed to flush table '{}': {}", table_name, e))?;
+            println!("[TableManager] Closed table: {}", table_name);
         }
         Ok(())
     }
@@ -113,9 +128,11 @@ impl TableManager {
         self.catalog.drop_table(table_name)?;
 
         // 删除数据文件
-        let file_path = format!("{}.tbl", table_name);
-        std::fs::remove_file(&file_path)
+        let file_path = format!("data/{}.tbl", table_name);
+        FileManager::delete_file(&file_path)
             .map_err(|e| format!("Failed to delete data file for table '{}': {}", table_name, e))?;
+
+        println!("[TableManager] Dropped table: {}", table_name);
 
         Ok(())
     }
@@ -123,5 +140,19 @@ impl TableManager {
     // 检查表是否已打开
     pub fn is_table_open(&self, table_name: &str) -> bool {
         self.open_tables.contains_key(table_name)
+    }
+
+    // 检查表是否存在
+    pub fn table_exists(&self, table_name: &str) -> bool {
+        self.catalog.table_exists(table_name)
+    }
+
+    // 刷新并关闭所有打开的表
+    pub fn close_all_tables(&mut self) -> Result<(), String> {
+        let open_names: Vec<String> = self.get_open_tables();
+        for table_name in open_names {
+            self.close_table(&table_name)?;
+        }
+        Ok(())
     }
 }

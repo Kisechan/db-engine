@@ -28,4 +28,9 @@ impl FileHeader {
         bincode::deserialize(data)
             .map_err(|e| format!("Failed to deserialize header: {}", e))
     }
+
+    // 返回序列化后的大小
+    pub fn get_serialized_size(&self) -> Result<usize, String> {
+        Ok(self.serialize()?.len())
+    }
 }

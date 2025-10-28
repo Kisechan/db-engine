@@ -23,7 +23,7 @@ pub struct TableHandler {
 impl TableHandler {
     pub fn new(table_name: String, schema: TableSchema, file_handler: FileHandler) -> Self {
         // 这里示例构造一个新的 BufferManager，在实际项目会用单例或外部注入
-        let bm = BufferManager::new(128, format!("{}.tbl", table_name));
+        let bm = BufferManager::new(128, format!("data/{}.tbl", table_name));
         TableHandler {
             table_name,
             schema,

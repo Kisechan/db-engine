@@ -33,4 +33,14 @@ impl FileManager {
         let header = FileHandler::load_header(path)?;
         Ok(FileHandler::new(path.to_string(), header))
     }
+
+    // 删除文件
+    pub fn delete_file(path: &str) -> Result<(), String> {
+        DiskManager::delete_file(path)
+    }
+
+    // 检查文件是否存在
+    pub fn file_exists(path: &str) -> bool {
+        DiskManager::file_exists(path)
+    }
 }
