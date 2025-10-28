@@ -6,6 +6,7 @@ use crate::pm::page_handler::{PageHandler, SlotEntry};
 use crate::pm::page_header::PageHeader;
 use crate::mm::buffer_manager::BufferManager;
 use crate::rm::types::ColumnDef;
+use crate::pm::long_data::{LongDataPtr, LongDataPage, LongDataPageHeader};
 
 // 表级操作句柄（绑定一个文件）
 pub struct TableHandler {
@@ -290,5 +291,137 @@ impl TableHandler {
         self.buffer_manager.unpin_page(page_id, false)?;
 
         Ok(rids)
+    }
+
+    // 变长数据管理
+
+    // 将变长数据写入外部页面链，返回指针
+    pub fn store_var_data(&mut self, data: &[u8]) -> Result<LongDataPtr, String> {
+        const LONG_DATA_PAGE_DATA_SIZE: usize = 4090; // 4096 - 6 字节头部
+
+        if data.is_empty() {
+            return Err("Cannot store empty data".to_string());
+        }
+
+        let mut current_offset = 0;
+        let mut first_page_id: Option<PageId> = None;
+        let mut prev_page_id: Option<PageId> = None;
+
+        // 分块写入数据
+        while current_offset < data.len() {
+            // 计算本页应写入的数据量（提前计算以便在循环尾部使用）
+            let remaining = data.len() - current_offset;
+            let chunk_size = std::cmp::min(remaining, LONG_DATA_PAGE_DATA_SIZE);
+
+            // 分配新页
+            let page_id = self.file_handler.allocate_page()?;
+
+            // fetch 页并初始化
+            let page_buf = self.buffer_manager.fetch_page(page_id)?;
+            {
+                let mut lpage = LongDataPage::new(page_id);
+                
+                let chunk = &data[current_offset..current_offset + chunk_size];
+
+                // 写入数据
+                lpage.store_data(0, chunk)?;
+
+                // 不在此处额外分配 next page，prev->next 链接将在外部处理
+                // 复制回缓冲区
+                page_buf.copy_from_slice(&lpage.data);
+            }
+
+            // unpin 并标记为 dirty
+            self.buffer_manager.unpin_page(page_id, true)?;
+
+            // 记录第一页 ID
+            if first_page_id.is_none() {
+                first_page_id = Some(page_id);
+            }
+
+            // 记录前一页的 next_page（如果有）
+            if let Some(prev_id) = prev_page_id {
+                let prev_buf = self.buffer_manager.fetch_page(prev_id)?;
+                {
+                    let mut lpage = LongDataPage::new(prev_id);
+                    lpage.data.copy_from_slice(prev_buf);
+                    lpage.set_next_page(Some(page_id))?;
+                    prev_buf.copy_from_slice(&lpage.data);
+                }
+                self.buffer_manager.unpin_page(prev_id, true)?;
+            }
+
+            prev_page_id = Some(page_id);
+            current_offset += chunk_size;
+        }
+
+        Ok(LongDataPtr::new(
+            first_page_id.unwrap(),
+            data.len() as u32,
+        ))
+    }
+
+    // 从外部页面链读取变长数据
+    pub fn load_var_data(&mut self, ptr: &LongDataPtr) -> Result<Vec<u8>, String> {
+        let mut result = Vec::new();
+        let mut current_page_id = Some(ptr.first_page_id);
+        let mut remaining = ptr.total_length as usize;
+
+        while let Some(page_id) = current_page_id {
+            if remaining == 0 {
+                break;
+            }
+
+            // fetch 页
+            let page_buf = self.buffer_manager.fetch_page(page_id)?;
+
+            {
+                let mut lpage = LongDataPage::new(page_id);
+                let lpage_data_copy = page_buf.to_vec();
+                lpage.data.copy_from_slice(&lpage_data_copy);
+
+                let data_len = lpage.get_data_length()?;
+                let to_read = std::cmp::min(data_len, remaining);
+
+                // 读取数据
+                let chunk = lpage.load_data(0, to_read)?;
+                result.extend_from_slice(&chunk);
+                remaining -= to_read;
+
+                // 获取下一页
+                current_page_id = lpage.get_next_page()?;
+            }
+
+            // unpin 页（不标记 dirty）
+            self.buffer_manager.unpin_page(page_id, false)?;
+        }
+
+        Ok(result)
+    }
+
+    // 删除变长字段时释放页面链
+    pub fn release_var_data(&mut self, ptr: &LongDataPtr) -> Result<(), String> {
+        let mut current_page_id = Some(ptr.first_page_id);
+
+        while let Some(page_id) = current_page_id {
+            // fetch 页获取 next_page
+            let page_buf = self.buffer_manager.fetch_page(page_id)?;
+            let next_page_id = {
+                let mut lpage = LongDataPage::new(page_id);
+                let lpage_data_copy = page_buf.to_vec();
+                lpage.data.copy_from_slice(&lpage_data_copy);
+                lpage.get_next_page()?
+            };
+
+            // unpin 页
+            self.buffer_manager.unpin_page(page_id, false)?;
+
+            // 释放页（回收到 free-list）
+            self.file_handler.deallocate_page(page_id)?;
+
+            current_page_id = next_page_id;
+        }
+
+        Ok(())
     }
 }
