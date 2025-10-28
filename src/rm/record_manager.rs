@@ -357,21 +357,21 @@ impl RecordManager {
     }
 
     // 刷新所有表
-    pub fn flush_all(&mut self) -> Result<(), String> {
-        if self.current_txid.is_some() {
-            return Err("Cannot flush inside a transaction".to_string());
-        }
+    // pub fn flush_all(&mut self) -> Result<(), String> {
+    //     if self.current_txid.is_some() {
+    //         return Err("Cannot flush inside a transaction".to_string());
+    //     }
         
-        self.table_manager.close_all_tables()
-            .map_err(|e| format!("Failed to flush all tables: {}", e))
-    }
+    //     self.table_manager.close_all_tables()
+    //         .map_err(|e| format!("Failed to flush all tables: {}", e))
+    // }
 
     // 查询方法
 
     // 检查表是否存在
-    pub fn table_exists(&self, table: &str) -> bool {
-        self.table_manager.table_exists(table)
-    }
+    // pub fn table_exists(&self, table: &str) -> bool {
+    //     self.table_manager.table_exists(table)
+    // }
 
     // 获取所有打开的表名
     pub fn get_open_tables(&self) -> Vec<String> {
@@ -469,15 +469,15 @@ impl RecordManager {
     }
 
     // 获取变长数据统计信息
-    pub fn get_var_data_stats(&self, table: &str) -> Result<(u32, u32), String> {
-        let exists = self.table_manager.table_exists(table);
-        if !exists {
-            return Err(format!("Table '{}' does not exist", table));
-        }
+    // pub fn get_var_data_stats(&self, table: &str) -> Result<(u32, u32), String> {
+    //     let exists = self.table_manager.table_exists(table);
+    //     if !exists {
+    //         return Err(format!("Table '{}' does not exist", table));
+    //     }
         
-        // 这里可以扩展为返回更详细的统计信息
-        Ok((0, 0))
-    }
+    //     // 这里可以扩展为返回更详细的统计信息
+    //     Ok((0, 0))
+    // }
 }
 
 #[cfg(test)]

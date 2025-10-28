@@ -253,7 +253,7 @@ impl TransactionLogger {
 
     // 获取活跃事务数
     pub fn get_active_txn_count(&self) -> usize {
-        self.active_txns.iter().filter(|(_, committed)| !committed).count()
+        self.active_txns.iter().filter(|(_, committed)| !*committed).count()
     }
 
     // 获取下一个 txid（用于测试）
