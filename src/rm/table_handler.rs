@@ -249,4 +249,46 @@ impl TableHandler {
     pub fn get_data_pages(&self) -> &[PageId] {
         &self.data_pages
     }
+
+    // 列出指定页中所有有效的 RID（未被删除的记录）
+    pub fn list_valid_rids(&mut self, page_id: PageId) -> Result<Vec<RID>, String> {
+        // 检查页是否存在
+        if !self.data_pages.contains(&page_id) {
+            return Err(format!("Page {} not found in table", page_id));
+        }
+
+        // fetch_page 获取页缓冲
+        let page_buf = self.buffer_manager.fetch_page(page_id)?;
+
+        // 读取所有 slot 并收集有效 RID
+        let rids = {
+            let ph = PageHandler::new(page_buf, page_id);
+            
+            // 读取页头获取 slot 数量
+            let header = ph.read_header()?;
+            let slot_count = header.slot_count;
+            
+            let mut valid_rids = Vec::new();
+            
+            // 遍历所有 slot
+            for slot_id in 0..slot_count {
+                let slot = ph.read_slot(slot_id)?;
+                
+                // offset == -1 表示已删除，skip
+                if slot.offset != -1 {
+                    valid_rids.push(RID {
+                        page_id,
+                        slot_id,
+                    });
+                }
+            }
+            
+            valid_rids
+        };
+
+        // unpin 页（不标记 dirty，因为只是读取）
+        self.buffer_manager.unpin_page(page_id, false)?;
+
+        Ok(rids)
+    }
 }
