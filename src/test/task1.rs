@@ -150,7 +150,59 @@ pub fn task1() -> Result<(), String> {
 
     println!("Scanned {} records.", count);
 
-    // 输出缓冲页占用 & 文件磁盘页个数
-    println!("===== Test Completed Successfully =====");
+    // // 测试空闲链表
+    // println!("\n===== Testing Free List Reuse =====");
+
+    // // 删除前 100 条记录
+    // println!("Deleting first 100 records...");
+    // rm.begin_transaction()?;
+    
+    // for i in 0..100 {
+    //     let rid = RID {
+    //         page_id: 1,
+    //         slot_id: i,
+    //     };
+    //     rm.delete("account", rid)?;
+    //     if i % 20 == 0 {
+    //         println!("Deleted {} records", i);
+    //     }
+    // }
+    
+    // rm.commit_transaction()?;
+    // println!("Deleted 100 records successfully!");
+
+    // // 插入新记录（应该重用已删除的 slot）
+    // println!("\nInserting 50 new records (should reuse freed slots)...");
+    // rm.begin_transaction()?;
+
+    // for i in 0..50 {
+    //     let name = random_name();
+    //     let rec = make_account_record(10000 + i as u32, &name);
+    //     let bytes = rec.serialize();
+
+    //     let rid = rm.insert("account", &bytes)?;
+    //     if i % 10 == 0 {
+    //         println!("[Insert] New record inserted at RID{{{}, {}}}", rid.page_id, rid.slot_id);
+    //     }
+    // }
+
+    // rm.commit_transaction()?;
+    // println!("Inserted 50 new records successfully!");
+
+    // // 扫描并验证
+    // println!("\nVerifying data after delete+insert...");
+    // let mut count_after = 0;
+    // rm.scan_all("account", |rid: RID, _bytes: &[u8]| {
+    //     count_after += 1;
+    //     true
+    // })?;
+
+    // println!("Total records after delete+insert: {} (should be {})", count_after, total - 100 + 50);
+
+    // // 获取表统计
+    // let table_stats = rm.get_table_stats("account")?;
+    // table_stats.print_summary();
+
+    println!("\n===== Test Completed Successfully =====");
     Ok(())
 }

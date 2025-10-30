@@ -16,13 +16,12 @@ pub struct TableHandler {
     // 维护该表的数据页列表（可以从 file header/ catalog 中加载）
     pub data_pages: Vec<PageId>,
 
-    // 引用或拥有 BufferManager（在实际项目中用一个全局 BufferManager）
+    // 引用或拥有 BufferManager
     pub buffer_manager: BufferManager,
 }
 
 impl TableHandler {
     pub fn new(table_name: String, schema: TableSchema, file_handler: FileHandler) -> Self {
-        // 这里示例构造一个新的 BufferManager，在实际项目会用单例或外部注入
         let bm = BufferManager::new(128, format!("data/{}.tbl", table_name));
         TableHandler {
             table_name,
@@ -100,9 +99,11 @@ impl TableHandler {
             // 创建初始页头：
             // free_space_offset = PAGE_SIZE（数据区从顶部开始向下增长）
             // slot_count = 0（没有任何记录）
+            // free_slot_head = u16::MAX（没有空闲 slot）
             let init_header = PageHeader {
                 free_space_offset: PAGE_SIZE as u16,
                 slot_count: 0,
+                free_slot_head: u16::MAX,  // 初始无空闲 slot
             };
             
             ph.write_header(init_header)?;
@@ -423,5 +424,72 @@ impl TableHandler {
         }
 
         Ok(())
+    }
+
+    // 获取单页的统计信息
+    pub fn get_page_stats(&mut self, page_id: PageId) -> Result<crate::pm::page_handler::PageStats, String> {
+        if !self.data_pages.contains(&page_id) {
+            return Err(format!("Page {} not found in table", page_id));
+        }
+
+        let page_buf = self.buffer_manager.fetch_page(page_id)?;
+
+        let stats = {
+            let ph = PageHandler::new(page_buf, page_id);
+            ph.get_stats()?
+        };
+
+        self.buffer_manager.unpin_page(page_id, false)?;
+
+        Ok(stats)
+    }
+
+    // 获取整个表的统计信息
+    pub fn get_table_stats(&mut self) -> Result<TableStats, String> {
+        let mut total_slots = 0u32;
+        let mut total_free_slots = 0u32;
+        let mut total_used_slots = 0u32;
+        let mut total_free_space = 0usize;
+
+        for page_id in self.data_pages.clone() {
+            let stats = self.get_page_stats(page_id)?;
+            total_slots += stats.total_slots as u32;
+            total_free_slots += stats.free_slots as u32;
+            total_used_slots += stats.used_slots as u32;
+            total_free_space += stats.free_data_space;
+        }
+
+        Ok(TableStats {
+            num_pages: self.data_pages.len() as u32,
+            total_slots,
+            total_free_slots,
+            total_used_slots,
+            total_free_space,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TableStats {
+    pub num_pages: u32,
+    pub total_slots: u32,
+    pub total_free_slots: u32,
+    pub total_used_slots: u32,
+    pub total_free_space: usize,
+}
+
+impl TableStats {
+    pub fn print_summary(&self) {
+        println!("\n===== Table Statistics =====");
+        println!("Pages: {}", self.num_pages);
+        println!("Total slots: {}", self.total_slots);
+        println!("Used slots: {} ({:.1}%)", 
+            self.total_used_slots, 
+            self.total_used_slots as f32 / self.total_slots as f32 * 100.0);
+        println!("Free slots: {} ({:.1}%)", 
+            self.total_free_slots,
+            self.total_free_slots as f32 / self.total_slots as f32 * 100.0);
+        println!("Free data space: {} bytes", self.total_free_space);
+        println!("=============================\n");
     }
 }

@@ -3,16 +3,18 @@
 #[derive(Default, Clone, Copy)]
 pub struct PageHeader {
     pub free_space_offset: u16,  // 数据区空闲空间起始位置（从高地址向下增长）
-    pub slot_count: u16,         // slot table 条目数
+    pub slot_count: u16,         // slot table 总条目数（包括已删除的）
+    pub free_slot_head: u16,     // 空闲 slot 链表头 (u16::MAX 表示无)
 }
 
 impl PageHeader {
-    pub const SIZE: usize = 4; // 2 * u16
+    pub const SIZE: usize = 6; // 3 * u16
 
     pub fn serialize(&self) -> [u8; Self::SIZE] {
         let mut data = [0u8; Self::SIZE];
         data[0..2].copy_from_slice(&self.free_space_offset.to_le_bytes());
         data[2..4].copy_from_slice(&self.slot_count.to_le_bytes());
+        data[4..6].copy_from_slice(&self.free_slot_head.to_le_bytes());
         data
     }
 
@@ -23,6 +25,12 @@ impl PageHeader {
         Ok(PageHeader {
             free_space_offset: u16::from_le_bytes([data[0], data[1]]),
             slot_count: u16::from_le_bytes([data[2], data[3]]),
+            free_slot_head: u16::from_le_bytes([data[4], data[5]]),
         })
+    }
+
+    // 检查是否有空闲 slot
+    pub fn has_free_slot(&self) -> bool {
+        self.free_slot_head != u16::MAX
     }
 }

@@ -356,6 +356,12 @@ impl RecordManager {
             .map_err(|e| format!("Failed to close table '{}': {}", table, e))
     }
 
+    pub fn get_table_stats(&mut self, table_name: &str) -> Result<crate::rm::table_handler::TableStats, String> {
+        self.table_manager.get_table_handler_mut(table_name)
+            .ok_or(format!("Table '{}' not found", table_name))?
+            .get_table_stats()
+    }
+
     // 刷新所有表
     // pub fn flush_all(&mut self) -> Result<(), String> {
     //     if self.current_txid.is_some() {
