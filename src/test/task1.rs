@@ -3,11 +3,12 @@ use crate::rm::record_manager::{Record, RecordManager};
 use crate::rm::transaction_logger::TransactionLogger;
 use crate::rm::table_manager::TableManager;
 use crate::rm::types::*;
+use crate::mm::buffer_manager::BufferManager;
+use crate::fm::FileManager;
 
 use rand::Rng;
 
 use crate::common::RID;
-use crate::fm::FileManager;
 
 fn random_name() -> Vec<u8> {
     let mut rng = rand::thread_rng();
@@ -71,8 +72,20 @@ fn ensure_data_dir() -> Result<(), String> {
 pub fn task1() -> Result<(), String> {
     println!("===== Task1 DB Test Start =====");
 
+    // 指定初始化大小（字节），示例：主存 100 * PAGE_SIZE，磁盘 1000 * PAGE_SIZE
+    let mem_bytes = 100 * crate::common::disk_manager::PAGE_SIZE;
+    let disk_bytes = 1000 * crate::common::disk_manager::PAGE_SIZE;
+
     // 确保 data 目录存在
     ensure_data_dir()?;
+
+    // 先初始化磁盘映像（在 data/disk.img 中写入空页）
+    FileManager::init_disk_from_size(disk_bytes, "data")?;
+    println!("[Init] Disk initialized from {} bytes", disk_bytes);
+
+    // 初始化主存缓冲池（创建指定页数的空帧）
+    let _bm = BufferManager::init_memory_from_size(mem_bytes, "data".to_string());
+    println!("[Init] Memory buffer initialized from {} bytes ({} KB)", mem_bytes, mem_bytes / 1024);
 
     // 清理旧文件
     cleanup_old_files()?;

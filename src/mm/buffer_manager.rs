@@ -30,6 +30,14 @@ impl BufferManager {
         }
     }
 
+    pub fn init_memory_from_size(size: usize, file_path: String) -> Self {
+        let mut pages = if size == 0 { 1 } else { size / PAGE_SIZE };
+        if pages == 0 { pages = 1; }
+        println!("[BufferManager] Initializing memory pool from {} bytes -> {} pages (page_size={})",
+            size, pages, PAGE_SIZE);
+        BufferManager::new(pages, file_path)
+    }
+
     // 获取页数据：查找 -> 加载 -> pin
     pub fn fetch_page(&mut self, page_id: PageId) -> Result<&mut [u8], String> {
         // 查找是否已存在
