@@ -40,13 +40,13 @@ fn cleanup_old_files() -> Result<(), String> {
         println!("[Cleanup] Deleted directory: {}", data_dir);
     }
 
-    // 删除 db.log（事务日志）
-    let log_path = "db.log";
-    if std::path::Path::new(log_path).exists() {
-        std::fs::remove_file(log_path)
-            .map_err(|e| format!("Failed to delete log file: {}", e))?;
-        println!("[Cleanup] Deleted: {}", log_path);
-    }
+    // // 删除 db.log（事务日志）
+    // let log_path = "db.log";
+    // if std::path::Path::new(log_path).exists() {
+    //     std::fs::remove_file(log_path)
+    //         .map_err(|e| format!("Failed to delete log file: {}", e))?;
+    //     println!("[Cleanup] Deleted: {}", log_path);
+    // }
 
     println!("Cleanup completed.\n");
 

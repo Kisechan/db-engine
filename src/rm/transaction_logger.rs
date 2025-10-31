@@ -16,7 +16,7 @@ pub enum LogRecord {
 }
 
 // 日志文件名固定
-const LOG_FILE: &str = "db.log";
+const LOG_FILE: &str = "data/db.log";
 
 // 日志缓存管理器
 pub struct TransactionLogger {
