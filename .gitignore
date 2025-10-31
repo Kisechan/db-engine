@@ -1,7 +1,15 @@
+# 调试文件
 /target
+
+# 参考代码
 ref*
+
+# 临时文件
 data
 docs
 **/*.tbl
 **/*.log
 *.txt
+
+# IDE 配置
+.vscode/
