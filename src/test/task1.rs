@@ -103,6 +103,7 @@ pub fn task1() -> Result<(), String> {
     // 定义 account 表结构（定长字段）
     let schema = TableSchema {
         table_name: "account".to_string(),
+        table_id: 0,  // 会被 CatalogManager 自动分配
         columns: vec![
             ColumnDef {
                 name: "id".to_string(),
@@ -121,6 +122,9 @@ pub fn task1() -> Result<(), String> {
             },
         ],
         root_pages: vec![],
+        create_time: 0,     // 会被 CatalogManager 初始化
+        row_count: 0,
+        last_modified: 0,   // 会被 CatalogManager 初始化
     };
     
     println!("Creating table: account");

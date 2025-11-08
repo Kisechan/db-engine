@@ -13,6 +13,9 @@ const PAGE_SIZE: usize = 4096;
 pub struct CatalogManager {
     // 内存缓存：表名 -> schema
     schemas: HashMap<String, TableSchema>,
+    
+    // 下一个可用的表 ID（自动递增）
+    next_table_id: u32,
 }
 
 impl CatalogManager {
@@ -20,20 +23,42 @@ impl CatalogManager {
     pub fn new() -> Result<Self, String> {
         let mut mgr = CatalogManager {
             schemas: HashMap::new(),
+            next_table_id: 1,  // 从 1 开始分配 table_id（0 保留）
         };
         mgr.load_from_disk()?;
-        println!("[CatalogManager] Initialized with {} tables", mgr.schemas.len());
+        
+        // 计算下一个可用的 table_id
+        let max_id = mgr.schemas.values()
+            .map(|schema| schema.table_id)
+            .max()
+            .unwrap_or(0);
+        mgr.next_table_id = max_id + 1;
+        
+        println!("[CatalogManager] Initialized with {} tables, next_table_id={}", 
+            mgr.schemas.len(), mgr.next_table_id);
         Ok(mgr)
     }
 
     // 在内存中注册并持久化表模式
-    pub fn create_table(&mut self, schema: TableSchema) -> Result<(), String> {
+    pub fn create_table(&mut self, mut schema: TableSchema) -> Result<(), String> {
         let name = schema.table_name.clone();
         if self.schemas.contains_key(&name) {
             return Err(format!("Table '{}' already exists", name));
         }
+        
+        // 自动分配 table_id
+        schema.table_id = self.next_table_id;
+        self.next_table_id += 1;
+        
+        // 初始化时间戳
+        let now = TableSchema::current_timestamp();
+        schema.create_time = now;
+        schema.last_modified = now;
+        schema.row_count = 0;
+        
         self.schemas.insert(name.clone(), schema);
-        println!("[CatalogManager] Added table '{}' to memory cache", name);
+        println!("[CatalogManager] Added table '{}' to memory cache with table_id={}", 
+            name, self.schemas[&name].table_id);
         self.flush_to_disk()
     }
 
@@ -149,6 +174,7 @@ impl Default for CatalogManager {
     fn default() -> Self {
         CatalogManager {
             schemas: HashMap::new(),
+            next_table_id: 1,
         }
     }
 }
