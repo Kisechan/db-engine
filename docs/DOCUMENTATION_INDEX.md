@@ -8,6 +8,9 @@
 - **需要快速查阅？** → 📄 [`CATALOG_QUICK_REFERENCE.md`](CATALOG_QUICK_REFERENCE.md)
 - **要学习设计细节？** → 📄 [`SYSTEM_CATALOG_DESIGN.md`](SYSTEM_CATALOG_DESIGN.md)
 - **想看实现细节？** → 📄 [`IMPLEMENTATION_SUMMARY.md`](IMPLEMENTATION_SUMMARY.md)
+- **关于 B+ 树索引？** → 📄 [`TASK3_IMPLEMENTATION_REPORT.md`](TASK3_IMPLEMENTATION_REPORT.md)
+- **索引容量计算？** → 📄 [`INDEX_CAPACITY_CALCULATION.md`](INDEX_CAPACITY_CALCULATION.md)
+- **Task3 总结？** → 📄 [`TASK3_COMPLETION_SUMMARY.md`](TASK3_COMPLETION_SUMMARY.md)
 
 ## 📚 文档详情
 
@@ -99,7 +102,80 @@
 
 **阅读时间**: ⏱️ 15-20 分钟
 
-## 🗂️ 按用途快速查找
+---
+
+## 🆕 Task 3: B+ 树索引实现文档
+
+### 5. TASK3_IMPLEMENTATION_REPORT.md (Task3 实现报告)
+**概览**: Task 3 的完整实现细节和分析报告。
+
+**核心内容**:
+- 📋 任务需求说明
+- 🔄 实现流程（10 个测试阶段）
+- 🏗️ 核心模块设计（IXManager, IXHandler, BPTree）
+- 📊 性能分析与指标
+- 💾 文件生成结果验证
+- 🧪 集成测试结果
+- 📈 容量计算验证
+- 🔍 关键发现
+- 🚀 改进方向
+
+**适合**:
+- 想完全理解索引系统
+- 学习 B+ 树实现
+- 参考系统设计
+
+**阅读时间**: ⏱️ 20-30 分钟
+
+---
+
+### 6. INDEX_CAPACITY_CALCULATION.md (索引容量计算指南)
+**概览**: 详细的索引容量计算方法和公式。
+
+**核心内容**:
+- 🔢 基本参数和系统配置
+- 📐 索引项大小计算公式
+- � 不同键大小的容量表（11-42字节）
+- 🌳 树容量和递推关系
+- 💾 磁盘空间分配计算
+- 📈 性能特征分析（搜索、范围扫描、分裂成本）
+- 📄 页面格式示例
+- ✅ 实施检查清单
+- 📋 总结参考表
+
+**适合**:
+- 需要计算特定情景下的容量
+- 规划索引大小和性能
+- 优化空间利用率
+
+**阅读时间**: ⏱️ 15-20 分钟
+
+---
+
+### 7. TASK3_COMPLETION_SUMMARY.md (Task3 完成总结)
+**概览**: Task 3 的快速总结和成就汇总。
+
+**核心内容**:
+- ✅ 完成的功能清单（4项主要功能）
+- 📊 测试结果（31 个单元测试通过）
+- 📈 性能指标汇总
+- 📁 输出文件清单
+- 🔍 详细特性说明
+- 🎯 关键成就
+- 📚 文档汇总
+- 🚀 使用方法
+- 🔧 技术栈
+- 💡 设计亮点
+- 📋 验证清单
+
+**适合**:
+- 快速了解 Task3 完成情况
+- 查看关键指标和成果
+- 获取使用说明
+
+**阅读时间**: ⏱️ 10-15 分钟
+
+---
 
 ### 如果你想...
 
@@ -113,6 +189,9 @@
 | 了解磁盘格式 | SYSTEM_CATALOG_DESIGN | 💾 磁盘持久化格式 |
 | 获取代码示例 | CATALOG_QUICK_REFERENCE | 💻 代码示例 |
 | 学习后续方向 | COMPLETION_REPORT | 🚀 后续工作建议 |
+| **了解 B+ 树索引** | **TASK3_IMPLEMENTATION_REPORT** | **🌳 完整实现** |
+| **计算索引容量** | **INDEX_CAPACITY_CALCULATION** | **📊 容量表** |
+| **查看 Task3 成果** | **TASK3_COMPLETION_SUMMARY** | **✅ 完成情况** |
 
 ## 📞 常见问题
 
@@ -140,6 +219,29 @@
 🧪 查看: [`COMPLETION_REPORT.md`](COMPLETION_REPORT.md) - 测试结果部分
 📝 或查看: [`CATALOG_QUICK_REFERENCE.md`](CATALOG_QUICK_REFERENCE.md) - 日志输出示例
 
+---
+
+## 🔗 Task 3 (B+ 树索引) 特定问题
+
+### Q: 每页能存放多少索引项？
+📊 查看: [`INDEX_CAPACITY_CALCULATION.md`](INDEX_CAPACITY_CALCULATION.md) - 容量计算表
+💡 答案: **对于 4 字节键 = 291 项/页**
+
+### Q: Task3 是如何实现的？
+📋 查看: [`TASK3_IMPLEMENTATION_REPORT.md`](TASK3_IMPLEMENTATION_REPORT.md) - 完整实现流程
+
+### Q: 索引文件是如何生成的？
+📁 查看: [`TASK3_IMPLEMENTATION_REPORT.md`](TASK3_IMPLEMENTATION_REPORT.md) - Phase 2 索引创建
+
+### Q: B+ 树分裂如何工作？
+🌳 查看: [`TASK3_IMPLEMENTATION_REPORT.md`](TASK3_IMPLEMENTATION_REPORT.md) - Phase 3 数据导入
+
+### Q: Task3 测试包括什么内容？
+✅ 查看: [`TASK3_COMPLETION_SUMMARY.md`](TASK3_COMPLETION_SUMMARY.md) - 测试结果
+
+### Q: 如何运行 Task3？
+🚀 查看: [`TASK3_COMPLETION_SUMMARY.md`](TASK3_COMPLETION_SUMMARY.md) - 使用方法
+
 ## 🎓 学习路径
 
 ### 初级（5 分钟）
@@ -164,7 +266,10 @@
 | SYSTEM_CATALOG_DESIGN | 7.9K | 11 | 3 |
 | IMPLEMENTATION_SUMMARY | 6.9K | 11 | 5 |
 | CATALOG_QUICK_REFERENCE | 4.4K | 10 | 6 |
-| **总计** | **27.1K** | **45** | **16** |
+| **TASK3_IMPLEMENTATION_REPORT** | **~1000行** | **10** | **多处** |
+| **INDEX_CAPACITY_CALCULATION** | **~500行** | **11** | **表格/公式** |
+| **TASK3_COMPLETION_SUMMARY** | **~500行** | **13** | **多处** |
+| **总计** | **~45K** | **68** | **16+** |
 
 ## 🔍 查找关键词速查
 
