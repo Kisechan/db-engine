@@ -1,5 +1,9 @@
 use crate::ix::errors::{IXResult, IXError};
 use crate::ix::ix_handler::IXHandler;
+use crate::ix::node::BPTreeNode;
+use crate::fm::file_manager::FileManager;
+use crate::fm::file_header::FileHeader;
+use crate::common::disk_manager::DiskManager;
 use std::collections::HashMap;
 
 // 索引管理器
@@ -27,10 +31,11 @@ impl IXManager {
     // - `attr_len`: 属性长度
     // 
     // # 实现步骤
-    // 1. 构造索引文件名
-    // 2. 创建 IXHandler 实例
-    // 3. 初始化 B+ 树
-    // 4. 保存到打开的处理器映射
+    // 1. 检查索引是否已存在
+    // 2. 生成索引文件 (*.idx)
+    // 3. 初始化 B+ 树根页面
+    // 4. 创建 IXHandler 实例并初始化树
+    // 5. 在索引管理器中注册
     pub fn create_index(
         &mut self,
         table: &str,
@@ -46,17 +51,47 @@ impl IXManager {
 
         // 构造索引文件名
         let file_name = format!("{}.idx{}", table, index_no);
+        let file_path = format!("data/{}", file_name);
 
-        // 创建处理器
+        // 创建索引文件 (*.idx)
+        // 如果文件已存在，先删除
+        let _ = DiskManager::delete_file(&file_path);
+
+        // 创建新的索引文件并初始化文件头
+        FileManager::create_file(&file_path)
+            .map_err(|e| IXError::IOError(format!("Failed to create index file: {}", e)))?;
+
+        println!("[IXManager] Created index file: {}", file_path);
+
+        // 初始化 B+ 树根页面
+        // 创建根节点（page_id=1, 叶子节点）
+        let root_node = BPTreeNode::new(1, true);
+        
+        // 序列化根节点
+        let root_data = root_node.serialize();
+        
+        // 构造完整的页数据（4096 字节）
+        let mut page_data = vec![0u8; crate::common::disk_manager::PAGE_SIZE];
+        let data_len = root_data.len();
+        page_data[..data_len].copy_from_slice(&root_data);
+
+        // 写入根页面到文件
+        DiskManager::write_page(&file_path, 1, &page_data)
+            .map_err(|e| IXError::IOError(format!("Failed to write root page: {}", e)))?;
+
+        println!("[IXManager] Initialized B+ tree root page (page_id=1, size={} bytes)", data_len);
+
+        // 创建 IXHandler 实例并初始化树
         let mut handler = IXHandler::with_config(file_name.clone(), 4);
 
-        // 初始化树
-        handler.init_tree()?;
+        // 初始化树（在内存中创建 BPTree）
+        handler.init_tree()
+            .map_err(|e| IXError::IOError(format!("Failed to initialize tree: {:?}", e)))?;
 
-        // 保存处理器
+        // 5. 在索引管理器中注册
         self.handlers.insert(index_key.clone(), handler);
 
-        println!("[IXManager] Created index: {} ({})", index_key, file_name);
+        println!("[IXManager] Created index: {} ({})", index_key, file_path);
 
         Ok(())
     }
