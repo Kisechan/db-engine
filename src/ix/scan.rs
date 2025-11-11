@@ -1,16 +1,24 @@
-use crate::ix::handler::IXhandler;
 use crate::ix::errors::IXResult;
 
+#[allow(dead_code)]
 pub struct IXScan {
-    handler: IXhandlerr,
+    // handler: IXHandler,  // TODO: 需要定义正确的 handler 类型
     results: Vec<(u32, u16)>,
     cursor: usize,
 }
 
+#[allow(dead_code)]
 impl IXScan {
-    pub fn open_scan(handler: IXhandler, lower: &[u8], upper: &[u8]) -> IXResult<Self> {
-        let results = handler.tree.as_ref().unwrap().scan_range(lower, upper)?;
-        Ok(Self { handler, results, cursor: 0 })
+    pub fn new(results: Vec<(u32, u16)>) -> Self {
+        Self { results, cursor: 0 }
+    }
+
+    pub fn open_scan(_lower: &[u8], _upper: &[u8]) -> IXResult<Self> {
+        // TODO: 实现范围扫描
+        Ok(Self {
+            results: vec![],
+            cursor: 0,
+        })
     }
 
     pub fn next(&mut self) -> IXResult<Option<(u32, u16)>> {
