@@ -7,5 +7,5 @@ pub mod catalog_manager;
 pub mod errors;
 
 pub use ix_manager::IXManager;
-pub use ix_handler::IXHandler;
+pub use ix_handler::{IXHandler, IXIndexHandler};
 pub use scan::IXScan;

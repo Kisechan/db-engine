@@ -273,15 +273,15 @@ impl BPTree {
         }
     }
 
-    /// 删除 key-rid 对
-    /// 
-    /// 流程：
-    /// 1. 查找目标叶子节点
-    /// 2. 删除 key 和对应的 RID
-    /// 3. 如果叶子低于最小容量（< order/2）：
-    ///    - 先尝试从兄弟节点借位
-    ///    - 如果借位失败，合并两个节点
-    /// 4. 递归向上调整父节点
+    // 删除 key-rid 对
+    // 
+    // 流程：
+    // 1. 查找目标叶子节点
+    // 2. 删除 key 和对应的 RID
+    // 3. 如果叶子低于最小容量（< order/2）：
+    //    - 先尝试从兄弟节点借位
+    //    - 如果借位失败，合并两个节点
+    // 4. 递归向上调整父节点
     pub fn delete(&mut self, key: Vec<u8>, rid: (u32, u16)) -> IXResult<()> {
         if self.root == 0 {
             return Err(IXError::InvalidOperation);
@@ -335,7 +335,7 @@ impl BPTree {
         Ok(())
     }
 
-    /// 处理叶子节点下溢（key 数过少）
+    // 处理叶子节点下溢（key 数过少）
     fn handle_leaf_underflow(&mut self, _leaf: &mut BPTreeNode, leaf_page_id: PageId) -> IXResult<()> {
         // TODO: 实现完整的叶子平衡逻辑
         // 这里简化处理，实际应该：
@@ -348,7 +348,7 @@ impl BPTree {
         Ok(())
     }
 
-    /// 在键数组中查找 key 的位置（精确查找）
+    // 在键数组中查找 key 的位置（精确查找）
     fn find_key_position(&self, keys: &[Vec<u8>], key: &[u8]) -> usize {
         for (i, k) in keys.iter().enumerate() {
             if k.as_slice() == key {
@@ -358,14 +358,106 @@ impl BPTree {
         keys.len()
     }
 
-    pub fn search(&self, _key: &[u8]) -> IXResult<Option<(u32, u16)>> {
-        // TODO: 查找叶子节点 key
-        Ok(None)
+    // 查找键对应的 RID
+    // 
+    // # 参数
+    // - `key`: 要查找的键（二进制格式）
+    // 
+    // # 返回
+    // 如果找到返回 Some((page_id, slot_id))，否则返回 None
+    pub fn search(&self, key: &[u8]) -> IXResult<Option<(u32, u16)>> {
+        if self.root == 0 {
+            return Ok(None);
+        }
+
+        // 查找包含该键的叶子节点
+        let leaf_page_id = self.find_leaf(self.root, key)?;
+        let leaf_node = self.read_node(leaf_page_id)?;
+
+        println!("[BPTree] Search: looking for key in leaf page {}", leaf_page_id);
+
+        // 在叶子中查找
+        let key_pos = self.find_key_position(&leaf_node.keys, key);
+        
+        if key_pos >= leaf_node.keys.len() || leaf_node.keys[key_pos].as_slice() != key {
+            println!("[BPTree] Search: key not found");
+            return Ok(None);
+        }
+
+        // 返回对应的 RID
+        if key_pos < leaf_node.rids.len() {
+            let rid = leaf_node.rids[key_pos];
+            println!("[BPTree] Search: found RID {:?}", rid);
+            Ok(Some(rid))
+        } else {
+            Ok(None)
+        }
     }
 
-    pub fn scan_range(&self, _lower: &[u8], _upper: &[u8]) -> IXResult<Vec<(u32, u16)>> {
-        // TODO: 范围扫描
-        Ok(vec![])
+    // 范围扫描：找出所有键在 [lower, upper) 范围内的 RID
+    // 
+    // # 参数
+    // - `lower`: 范围下界（包含）
+    // - `upper`: 范围上界（不包含）
+    // 
+    // # 返回
+    // 范围内所有记录 ID 的列表
+    pub fn scan_range(&self, lower: &[u8], upper: &[u8]) -> IXResult<Vec<(u32, u16)>> {
+        if self.root == 0 {
+            println!("[BPTree] Scan: empty tree");
+            return Ok(vec![]);
+        }
+
+        let mut results = Vec::new();
+
+        // 1. 找到起始叶子节点（包含 lower 的叶子）
+        let start_leaf_page = self.find_leaf(self.root, lower)?;
+        let mut current_leaf_page = start_leaf_page;
+
+        println!("[BPTree] Scan: starting from leaf page {}", start_leaf_page);
+
+        // 2. 遍历叶子链表，收集范围内的所有 RID
+        loop {
+            let leaf_node = self.read_node(current_leaf_page)?;
+
+            println!("[BPTree] Scan: processing leaf page {} with {} keys", 
+                current_leaf_page, leaf_node.keys.len());
+
+            // 在当前叶子中收集符合条件的 RID
+            for (i, key) in leaf_node.keys.iter().enumerate() {
+                let key_bytes = key.as_slice();
+                
+                // 检查是否在范围内: lower <= key < upper
+                if key_bytes >= lower && key_bytes < upper {
+                    if i < leaf_node.rids.len() {
+                        let rid = leaf_node.rids[i];
+                        results.push(rid);
+                        println!("[BPTree] Scan: added RID {:?} for key {:?}", 
+                            rid, key_bytes);
+                    }
+                } else if key_bytes >= upper {
+                    // 已超过范围上界，可以停止扫描
+                    println!("[BPTree] Scan: reached upper bound, stopping");
+                    return Ok(results);
+                }
+            }
+
+            // 3. 沿着 next_leaf 指针继续扫描下一个叶子
+            match leaf_node.next_leaf {
+                Some(next_page) => {
+                    current_leaf_page = next_page;
+                    println!("[BPTree] Scan: moving to next leaf page {}", next_page);
+                }
+                None => {
+                    // 没有更多的叶子了，扫描完成
+                    println!("[BPTree] Scan: reached end of leaf chain");
+                    break;
+                }
+            }
+        }
+
+        println!("[BPTree] Scan: completed, found {} results", results.len());
+        Ok(results)
     }
 }
 
@@ -443,5 +535,106 @@ mod tests {
         let result = btree.delete(key, rid);
         println!("Delete from empty tree result: {:?}", result);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_search() {
+        let mut btree = BPTree::new(3);
+
+        // 插入一些键
+        let key1 = vec![1, 0, 0];
+        let rid1 = (100u32, 0u16);
+        btree.insert(key1.clone(), rid1).expect("Insert failed");
+
+        let key2 = vec![2, 0, 0];
+        let rid2 = (200u32, 1u16);
+        btree.insert(key2.clone(), rid2).expect("Insert failed");
+
+        let key3 = vec![3, 0, 0];
+        let rid3 = (300u32, 2u16);
+        btree.insert(key3.clone(), rid3).expect("Insert failed");
+
+        println!("Inserted 3 keys");
+
+        // 搜索存在的键
+        let result = btree.search(&key1).expect("Search failed");
+        assert_eq!(result, Some(rid1));
+        println!("✓ Found key1: {:?}", result);
+
+        let result = btree.search(&key2).expect("Search failed");
+        assert_eq!(result, Some(rid2));
+        println!("✓ Found key2: {:?}", result);
+
+        // 搜索不存在的键
+        let not_exist_key = vec![99, 0, 0];
+        let result = btree.search(&not_exist_key).expect("Search failed");
+        assert_eq!(result, None);
+        println!("✓ Key not found (as expected)");
+    }
+
+    #[test]
+    fn test_scan_range() {
+        let mut btree = BPTree::new(4);
+
+        // 插入多个键
+        let test_data = vec![
+            (vec![1, 0, 0], (10u32, 0u16)),
+            (vec![2, 0, 0], (20u32, 1u16)),
+            (vec![3, 0, 0], (30u32, 2u16)),
+            (vec![4, 0, 0], (40u32, 3u16)),
+            (vec![5, 0, 0], (50u32, 4u16)),
+            (vec![6, 0, 0], (60u32, 5u16)),
+        ];
+
+        for (key, rid) in &test_data {
+            btree.insert(key.clone(), *rid).expect("Insert failed");
+        }
+
+        println!("Inserted {} keys", test_data.len());
+
+        // 测试范围扫描：[2, 5)
+        let lower = vec![2, 0, 0];
+        let upper = vec![5, 0, 0];
+        let results = btree.scan_range(&lower, &upper).expect("Scan failed");
+
+        println!("Scan [2, 5) returned {} results", results.len());
+        assert_eq!(results.len(), 3);  // 应该有 key 2, 3, 4
+        assert_eq!(results[0], (20u32, 1u16));
+        assert_eq!(results[1], (30u32, 2u16));
+        assert_eq!(results[2], (40u32, 3u16));
+
+        println!("✓ Scan range [2, 5) test passed");
+
+        // 测试范围扫描：[1, 3)
+        let lower = vec![1, 0, 0];
+        let upper = vec![3, 0, 0];
+        let results = btree.scan_range(&lower, &upper).expect("Scan failed");
+
+        println!("Scan [1, 3) returned {} results", results.len());
+        assert_eq!(results.len(), 2);  // 应该有 key 1, 2
+        assert_eq!(results[0], (10u32, 0u16));
+        assert_eq!(results[1], (20u32, 1u16));
+
+        println!("✓ Scan range [1, 3) test passed");
+
+        // 测试范围扫描：空范围
+        let lower = vec![10, 0, 0];
+        let upper = vec![20, 0, 0];
+        let results = btree.scan_range(&lower, &upper).expect("Scan failed");
+
+        println!("Scan [10, 20) returned {} results (empty range)", results.len());
+        assert_eq!(results.len(), 0);
+
+        println!("✓ Scan empty range test passed");
+
+        // 测试范围扫描：全表
+        let lower = vec![0, 0, 0];
+        let upper = vec![255, 255, 255];
+        let results = btree.scan_range(&lower, &upper).expect("Scan failed");
+
+        println!("Scan [0, 255) returned {} results (full table)", results.len());
+        assert_eq!(results.len(), 6);
+
+        println!("✓ Scan full range test passed");
     }
 }
