@@ -6,3 +6,4 @@
 
 各部分的具体介绍可以参考我[博客](https://blog.kisechan.space/)中的文章：
 1. [内存、外存和记录管理](https://blog.kisechan.space/2025/db-engine-1/)
+2. [索引](https://blog.kisechan.space/2025/db-engine-2/)
