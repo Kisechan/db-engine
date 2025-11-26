@@ -5,6 +5,8 @@ mod pm;
 mod ix;
 mod common;
 mod test;
+mod sql;
+mod exec;
 
 use test::task3;
 
