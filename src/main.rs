@@ -9,10 +9,10 @@ mod sql;
 mod exec;
 mod plan;
 
-use test::task3;
+use test::task4;
 
 fn main() -> Result<(), String> {
-    task3::task3()?;
+    task4::task4()?;
     
     Ok(())
 }
