@@ -20,6 +20,10 @@
 
 pub mod iterator;
 pub mod scan;
+pub mod filter;
+pub mod join;
 
 pub use iterator::{Executor, ExecutorRecord, ExecutorBox};
 pub use scan::SeqScanExecutor;
+pub use filter::FilterExecutor;
+pub use join::NestedLoopJoinExecutor;

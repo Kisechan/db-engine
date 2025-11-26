@@ -6,6 +6,7 @@ use std::io::{Cursor, Read, Write};
 const PAGE_SIZE: usize = 4096;
 
 // 已打开的文件句柄
+#[derive(Clone)]
 pub struct FileHandler {
     pub file_path: String,
     pub header: FileHeader,

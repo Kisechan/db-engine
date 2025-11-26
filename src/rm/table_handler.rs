@@ -9,6 +9,7 @@ use crate::rm::types::ColumnDef;
 use crate::pm::long_data::{LongDataPtr, LongDataPage, LongDataPageHeader};
 
 // 表级操作句柄（绑定一个文件）
+#[derive(Clone)]
 pub struct TableHandler {
     pub table_name: String,
     pub schema: TableSchema,

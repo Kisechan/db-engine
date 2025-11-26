@@ -7,6 +7,7 @@ pub trait Replacer {
 }
 
 // LRU 替换策略
+#[derive(Clone)]
 pub struct LRU {
     frames: VecDeque<usize>,    // 未被 pin 的 frame 队列
     pinned: std::collections::HashSet<usize>, // 已被 pin 的 frame

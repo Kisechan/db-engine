@@ -7,6 +7,7 @@ use std::collections::HashMap;
 const PAGE_SIZE: usize = 4096;
 
 // BufferManager：负责页缓存、替换、脏页管理
+#[derive(Clone)]
 pub struct BufferManager {
     frames: Vec<Frame>,                   // 缓冲池
     page_table: HashMap<PageId, usize>,   // 页号 -> 帧号的映射
