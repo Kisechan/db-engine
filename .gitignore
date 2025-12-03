@@ -4,11 +4,12 @@
 # 参考代码
 ref*
 
-# 临时文件
+# 临时文件/本地数据库
 data
 **/*.tbl
 **/*.log
 *.txt
+test_*
 
 # IDE 配置
 .vscode/

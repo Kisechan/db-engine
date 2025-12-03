@@ -11,6 +11,13 @@ pub enum Statement {
     Insert(InsertStmt),
     Delete(DeleteStmt),
     Update(UpdateStmt),
+    
+    // 数据库管理语句
+    CreateDatabase(CreateDatabaseStmt),
+    DropDatabase(DropDatabaseStmt),
+    UseDatabase(UseDatabaseStmt),
+    ShowDatabases,
+    ShowTables,
 }
 
 // CREATE TABLE 语句
@@ -53,6 +60,26 @@ impl fmt::Display for DataType {
 pub struct DropTableStmt {
     pub table_name: String,
     pub if_exists: bool,
+}
+
+// CREATE DATABASE 语句
+#[derive(Debug, Clone, PartialEq)]
+pub struct CreateDatabaseStmt {
+    pub database_name: String,
+    pub if_not_exists: bool,
+}
+
+// DROP DATABASE 语句
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropDatabaseStmt {
+    pub database_name: String,
+    pub if_exists: bool,
+}
+
+// USE DATABASE 语句
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseDatabaseStmt {
+    pub database_name: String,
 }
 
 // SELECT 语句（重点）
@@ -255,5 +282,56 @@ mod tests {
         assert_eq!(BinaryOperator::Eq.to_string(), "=");
         assert_eq!(BinaryOperator::And.to_string(), "AND");
         assert_eq!(BinaryOperator::Lt.to_string(), "<");
+    }
+
+    #[test]
+    fn test_create_database_ast() {
+        let stmt = CreateDatabaseStmt {
+            database_name: "mydb".to_string(),
+            if_not_exists: true,
+        };
+        assert_eq!(stmt.database_name, "mydb");
+        assert_eq!(stmt.if_not_exists, true);
+    }
+
+    #[test]
+    fn test_drop_database_ast() {
+        let stmt = DropDatabaseStmt {
+            database_name: "testdb".to_string(),
+            if_exists: true,
+        };
+        assert_eq!(stmt.database_name, "testdb");
+        assert_eq!(stmt.if_exists, true);
+    }
+
+    #[test]
+    fn test_use_database_ast() {
+        let stmt = UseDatabaseStmt {
+            database_name: "production".to_string(),
+        };
+        assert_eq!(stmt.database_name, "production");
+    }
+
+    #[test]
+    fn test_statement_variants() {
+        let create_db = Statement::CreateDatabase(CreateDatabaseStmt {
+            database_name: "test".to_string(),
+            if_not_exists: false,
+        });
+        let drop_db = Statement::DropDatabase(DropDatabaseStmt {
+            database_name: "test".to_string(),
+            if_exists: true,
+        });
+        let use_db = Statement::UseDatabase(UseDatabaseStmt {
+            database_name: "test".to_string(),
+        });
+        let show_dbs = Statement::ShowDatabases;
+        let show_tables = Statement::ShowTables;
+
+        assert!(matches!(create_db, Statement::CreateDatabase(_)));
+        assert!(matches!(drop_db, Statement::DropDatabase(_)));
+        assert!(matches!(use_db, Statement::UseDatabase(_)));
+        assert!(matches!(show_dbs, Statement::ShowDatabases));
+        assert!(matches!(show_tables, Statement::ShowTables));
     }
 }

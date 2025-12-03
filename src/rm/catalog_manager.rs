@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use crate::rm::types::TableSchema;
 use crate::common::disk_manager::DiskManager;
+use std::path::{Path, PathBuf};
 
-// Catalog 持久化文件名
-const CATALOG_FILE: &str = "data/catalog.tbl";
+// Catalog 页面大小
 const PAGE_SIZE: usize = 4096;
 
 // 内存 + 持久化的 Catalog 管理器
@@ -16,14 +16,32 @@ pub struct CatalogManager {
     
     // 下一个可用的表 ID（自动递增）
     next_table_id: u32,
+    
+    // Catalog 文件路径（不参与序列化）
+    #[serde(skip)]
+    catalog_file_path: PathBuf,
 }
 
 impl CatalogManager {
-    // 创建新的 CatalogManager（会尝试从磁盘加载 catalog）
-    pub fn new() -> Result<Self, String> {
+    // 创建新的 CatalogManager
+    // 
+    // # 参数
+    // - `catalog_path`: catalog 文件路径（如 "./data/mydb/catalog.tbl"）
+    //   如果为 None，使用默认路径 "data/catalog.tbl"
+    // 
+    // # 返回
+    // - `Ok(CatalogManager)`: 成功创建
+    // - `Err(String)`: 创建失败
+    pub fn new<P: AsRef<Path>>(catalog_path: Option<P>) -> Result<Self, String> {
+        let catalog_file_path = match catalog_path {
+            Some(p) => p.as_ref().to_path_buf(),
+            None => PathBuf::from("data/catalog.tbl"), // 默认路径，用于向后兼容
+        };
+        
         let mut mgr = CatalogManager {
             schemas: HashMap::new(),
             next_table_id: 1,  // 从 1 开始分配 table_id（0 保留）
+            catalog_file_path: catalog_file_path.clone(),
         };
         mgr.load_from_disk()?;
         
@@ -34,8 +52,8 @@ impl CatalogManager {
             .unwrap_or(0);
         mgr.next_table_id = max_id + 1;
         
-        println!("[CatalogManager] Initialized with {} tables, next_table_id={}", 
-            mgr.schemas.len(), mgr.next_table_id);
+        println!("[CatalogManager] Initialized with {} tables, next_table_id={} (path: {:?})", 
+            mgr.schemas.len(), mgr.next_table_id, mgr.catalog_file_path);
         Ok(mgr)
     }
 
@@ -86,6 +104,14 @@ impl CatalogManager {
 
     // 将内存中的 catalog 序列化并写盘（覆盖）
     pub fn flush_to_disk(&self) -> Result<(), String> {
+        // 确保目录存在
+        if let Some(parent) = self.catalog_file_path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("Failed to create catalog directory: {}", e))?;
+            }
+        }
+        
         // 序列化 schemas
         let encoded = bincode::serialize(&self.schemas)
             .map_err(|e| format!("Failed to serialize catalog: {}", e))?;
@@ -100,7 +126,9 @@ impl CatalogManager {
         }
 
         // 创建或覆盖文件
-        DiskManager::create_file(CATALOG_FILE)
+        let catalog_file = self.catalog_file_path.to_str()
+            .ok_or("Invalid catalog file path")?;
+        DiskManager::create_file(catalog_file)
             .map_err(|e| format!("Failed to create catalog file: {}", e))?;
 
         // 将序列化数据填充到一整页
@@ -108,45 +136,52 @@ impl CatalogManager {
         page_data[..encoded.len()].copy_from_slice(&encoded);
 
         // 写入第0页
-        DiskManager::write_page(CATALOG_FILE, 0, &page_data)
+        DiskManager::write_page(catalog_file, 0, &page_data)
             .map_err(|e| format!("Failed to write catalog to disk: {}", e))?;
 
-        println!("[CatalogManager] Flushed {} tables to disk ({} bytes)", 
-            self.schemas.len(), encoded.len());
+        println!("[CatalogManager] Flushed {} tables to disk ({} bytes) at {:?}", 
+            self.schemas.len(), encoded.len(), self.catalog_file_path);
         Ok(())
     }
 
     // 从磁盘加载 catalog 到内存（如果文件不存在则返回 Ok）
     pub fn load_from_disk(&mut self) -> Result<(), String> {
         // 检查文件是否存在
-        if !std::path::Path::new(CATALOG_FILE).exists() {
-            println!("[CatalogManager] Catalog file not found, starting with empty schema");
+        if !self.catalog_file_path.exists() {
+            println!("[CatalogManager] Catalog file not found at {:?}, starting with empty schema", 
+                self.catalog_file_path);
             return Ok(());
         }
 
         // 检查文件大小
-        let metadata = std::fs::metadata(CATALOG_FILE)
+        let metadata = std::fs::metadata(&self.catalog_file_path)
             .map_err(|e| format!("Failed to get catalog file metadata: {}", e))?;
 
+        // 如果文件为空，说明是新建的空文件
         if metadata.len() == 0 {
             println!("[CatalogManager] Catalog file is empty, starting with empty schema");
             return Ok(());
         }
 
         // 读取第0页
+        let catalog_file = self.catalog_file_path.to_str()
+            .ok_or("Invalid catalog file path")?;
         let mut buffer = vec![0u8; PAGE_SIZE];
-        DiskManager::read_page(CATALOG_FILE, 0, &mut buffer)
+        DiskManager::read_page(catalog_file, 0, &mut buffer)
             .map_err(|e| format!("Failed to read catalog from disk: {}", e))?;
 
-        // 找到真实数据长度（去除尾部 0 字节）
-        let end = buffer.iter().rposition(|&b| b != 0).unwrap_or(0) + 1;
-
-        // 如果页面全为 0，表示 catalog 为空
-        if end == 0 {
-            println!("[CatalogManager] Catalog page is empty, starting with empty schema");
+        // 检查是否全为 0
+        let has_nonzero = buffer.iter().any(|&b| b != 0);
+        
+        // 如果页面全为 0，表示 catalog 为空（新建的数据库）
+        if !has_nonzero {
+            println!("[CatalogManager] Catalog page is all zeros, starting with empty schema");
             self.schemas = HashMap::new();
             return Ok(());
         }
+        
+        // 找到真实数据长度（去除尾部 0 字节）
+        let end = buffer.iter().rposition(|&b| b != 0).unwrap_or(0) + 1;
 
         // 反序列化数据
         let bytes = &buffer[..end];
@@ -155,7 +190,8 @@ impl CatalogManager {
 
         let table_count = schemas.len();
         self.schemas = schemas;
-        println!("[CatalogManager] Loaded {} tables from disk", table_count);
+        println!("[CatalogManager] Loaded {} tables from disk at {:?}", 
+            table_count, self.catalog_file_path);
         Ok(())
     }
 
@@ -175,6 +211,7 @@ impl Default for CatalogManager {
         CatalogManager {
             schemas: HashMap::new(),
             next_table_id: 1,
+            catalog_file_path: PathBuf::from("data/catalog.tbl"),
         }
     }
 }

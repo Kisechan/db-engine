@@ -241,7 +241,8 @@ pub fn task3() -> Result<(), String> {
     cleanup_old_files()?;
 
     // 初始化系统组件
-    let catalog = CatalogManager::new()?;
+    // 使用默认路径 "data/catalog.tbl"
+    let catalog = CatalogManager::new(None::<&str>)?;
     println!("[Init] Catalog initialized");
     
     let logger = TransactionLogger::new(1024 * 100 * 4);

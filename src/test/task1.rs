@@ -91,7 +91,8 @@ pub fn task1() -> Result<(), String> {
     cleanup_old_files()?;
 
     // 初始化 Catalog & TableManager & Logger & RM
-    let catalog = CatalogManager::new()?;
+    // 使用默认路径 "data/catalog.tbl"
+    let catalog = CatalogManager::new(None::<&str>)?;
     println!("Catalog initialized.");
     let logger = TransactionLogger::new(1024 * 100 * 4);
     println!("Logger initialized.");

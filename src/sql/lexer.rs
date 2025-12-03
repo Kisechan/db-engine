@@ -43,6 +43,15 @@ pub enum Token {
     Right,
     Full,
     Outer,
+    
+    // 数据库管理关键字
+    CreateDatabase,
+    DropDatabase,
+    Use,
+    Show,
+    Database,
+    Databases,
+    Tables,
 
     // 标识符和字面量
     Identifier(String),
@@ -114,6 +123,13 @@ impl fmt::Display for Token {
             Token::Right => write!(f, "RIGHT"),
             Token::Full => write!(f, "FULL"),
             Token::Outer => write!(f, "OUTER"),
+            Token::CreateDatabase => write!(f, "CREATE DATABASE"),
+            Token::DropDatabase => write!(f, "DROP DATABASE"),
+            Token::Use => write!(f, "USE"),
+            Token::Show => write!(f, "SHOW"),
+            Token::Database => write!(f, "DATABASE"),
+            Token::Databases => write!(f, "DATABASES"),
+            Token::Tables => write!(f, "TABLES"),
             Token::Identifier(s) => write!(f, "{}", s),
             Token::Integer(n) => write!(f, "{}", n),
             Token::Float(n) => write!(f, "{}", n),
@@ -262,7 +278,7 @@ impl Lexer {
             "SET" => Token::Set,
             "DELETE" => Token::Delete,
             "CREATE" => {
-                // 需要查看下一个关键字是否是 TABLE
+                // 需要查看下一个关键字是否是 TABLE 或 DATABASE
                 self.skip_whitespace();
                 let mut next_ident = String::new();
                 while let Some(ch) = self.current_char {
@@ -273,19 +289,21 @@ impl Lexer {
                         break;
                     }
                 }
-                if next_ident.to_uppercase() == "TABLE" {
-                    Token::CreateTable
-                } else {
-                    // 退回处理
-                    for _ in 0..next_ident.len() {
-                        self.position = self.position.saturating_sub(1);
+                match next_ident.to_uppercase().as_str() {
+                    "TABLE" => Token::CreateTable,
+                    "DATABASE" => Token::CreateDatabase,
+                    _ => {
+                        // 退回处理
+                        for _ in 0..next_ident.len() {
+                            self.position = self.position.saturating_sub(1);
+                        }
+                        self.current_char = if self.position < self.input.len() {
+                            Some(self.input[self.position])
+                        } else {
+                            None
+                        };
+                        Token::Identifier(ident)
                     }
-                    self.current_char = if self.position < self.input.len() {
-                        Some(self.input[self.position])
-                    } else {
-                        None
-                    };
-                    Token::Identifier(ident)
                 }
             }
             "DROP" => {
@@ -299,18 +317,20 @@ impl Lexer {
                         break;
                     }
                 }
-                if next_ident.to_uppercase() == "TABLE" {
-                    Token::DropTable
-                } else {
-                    for _ in 0..next_ident.len() {
-                        self.position = self.position.saturating_sub(1);
+                match next_ident.to_uppercase().as_str() {
+                    "TABLE" => Token::DropTable,
+                    "DATABASE" => Token::DropDatabase,
+                    _ => {
+                        for _ in 0..next_ident.len() {
+                            self.position = self.position.saturating_sub(1);
+                        }
+                        self.current_char = if self.position < self.input.len() {
+                            Some(self.input[self.position])
+                        } else {
+                            None
+                        };
+                        Token::Identifier(ident)
                     }
-                    self.current_char = if self.position < self.input.len() {
-                        Some(self.input[self.position])
-                    } else {
-                        None
-                    };
-                    Token::Identifier(ident)
                 }
             }
             "DISTINCT" => Token::Distinct,
@@ -387,6 +407,11 @@ impl Lexer {
             "RIGHT" => Token::Right,
             "FULL" => Token::Full,
             "OUTER" => Token::Outer,
+            "USE" => Token::Use,
+            "SHOW" => Token::Show,
+            "DATABASE" => Token::Database,
+            "DATABASES" => Token::Databases,
+            "TABLES" => Token::Tables,
             _ => Token::Identifier(ident),
         }
     }
@@ -630,5 +655,65 @@ mod tests {
         assert_eq!(tokens[0], Token::Select);
         assert!(matches!(tokens[1], Token::Identifier(_)));
         assert_eq!(tokens[2], Token::Comma);
+    }
+
+    #[test]
+    fn test_create_database_keyword() {
+        let lexer = Lexer::new("CREATE DATABASE mydb");
+        let tokens = lexer.tokenize();
+        assert_eq!(tokens[0], Token::CreateDatabase);
+        assert!(matches!(tokens[1], Token::Identifier(_)));
+    }
+
+    #[test]
+    fn test_drop_database_keyword() {
+        let lexer = Lexer::new("DROP DATABASE mydb");
+        let tokens = lexer.tokenize();
+        assert_eq!(tokens[0], Token::DropDatabase);
+    }
+
+    #[test]
+    fn test_use_database_keyword() {
+        let lexer = Lexer::new("USE mydb");
+        let tokens = lexer.tokenize();
+        assert_eq!(tokens[0], Token::Use);
+        assert!(matches!(tokens[1], Token::Identifier(_)));
+    }
+
+    #[test]
+    fn test_show_databases_keyword() {
+        let lexer = Lexer::new("SHOW DATABASES");
+        let tokens = lexer.tokenize();
+        assert_eq!(tokens[0], Token::Show);
+        assert_eq!(tokens[1], Token::Databases);
+    }
+
+    #[test]
+    fn test_show_tables_keyword() {
+        let lexer = Lexer::new("SHOW TABLES");
+        let tokens = lexer.tokenize();
+        assert_eq!(tokens[0], Token::Show);
+        assert_eq!(tokens[1], Token::Tables);
+    }
+
+    #[test]
+    fn test_create_database_if_not_exists() {
+        let lexer = Lexer::new("CREATE DATABASE IF NOT EXISTS testdb");
+        let tokens = lexer.tokenize();
+        assert_eq!(tokens[0], Token::CreateDatabase);
+        assert_eq!(tokens[1], Token::If);
+        assert_eq!(tokens[2], Token::Not);
+        assert_eq!(tokens[3], Token::Exists);
+        assert!(matches!(tokens[4], Token::Identifier(_)));
+    }
+
+    #[test]
+    fn test_drop_database_if_exists() {
+        let lexer = Lexer::new("DROP DATABASE IF EXISTS testdb");
+        let tokens = lexer.tokenize();
+        assert_eq!(tokens[0], Token::DropDatabase);
+        assert_eq!(tokens[1], Token::If);
+        assert_eq!(tokens[2], Token::Exists);
+        assert!(matches!(tokens[3], Token::Identifier(_)));
     }
 }
