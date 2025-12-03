@@ -29,17 +29,17 @@
 // let mut db_mgr = DatabaseManager::new("./data")?;
 //
 // // 创建数据库
-// db_mgr.create_database("mydb", false)?;
+// db_mgr.create_database("KisechansDB", false)?;
 //
 // // 列出所有数据库
 // let databases = db_mgr.list_databases()?;
 // println!("Databases: {:?}", databases);
 //
 // // 切换到数据库（注意：当前版本需要 CatalogManager 支持自定义路径）
-// // db_mgr.use_database("mydb")?;
+// // db_mgr.use_database("KisechansDB")?;
 //
 // // 删除数据库
-// db_mgr.drop_database("mydb", false)?;
+// db_mgr.drop_database("KisechansDB", false)?;
 //
 // // 关闭所有数据库
 // db_mgr.close_all()?;
@@ -47,7 +47,7 @@
 //
 // # 限制和 TODO
 //
-// - ⚠️ CatalogManager 当前使用硬编码路径 "data/catalog.tbl"
+// - ! CatalogManager 当前使用硬编码路径 "data/catalog.tbl"
 // - TODO: 重构 CatalogManager 以支持自定义数据库路径
 // - TODO: 实现数据库切换时的路径管理
 // - TODO: 添加数据库备份和恢复功能
@@ -489,12 +489,12 @@ mod tests {
         let mut manager = DatabaseManager::new(test_path).unwrap();
         
         // 创建数据库
-        manager.create_database("mydb", false).unwrap();
+        manager.create_database("KisechansDB", false).unwrap();
         
         // 切换数据库
-        match manager.use_database("mydb") {
+        match manager.use_database("KisechansDB") {
             Ok(_) => {
-                assert_eq!(manager.current_database_name(), Some("mydb"));
+                assert_eq!(manager.current_database_name(), Some("KisechansDB"));
             }
             Err(e) => {
                 panic!("Failed to use database: {}", e);

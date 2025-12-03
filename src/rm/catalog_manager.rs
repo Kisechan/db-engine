@@ -26,8 +26,8 @@ impl CatalogManager {
     // 创建新的 CatalogManager
     // 
     // # 参数
-    // - `catalog_path`: catalog 文件路径（如 "./data/mydb/catalog.tbl"）
-    //   如果为 None，使用默认路径 "data/catalog.tbl"
+    // - `catalog_path`: catalog 文件路径（如 "./data/db/catalog.tbl"）
+    //   如果为 None，使用默认路径 "data/db/catalog.tbl"
     // 
     // # 返回
     // - `Ok(CatalogManager)`: 成功创建

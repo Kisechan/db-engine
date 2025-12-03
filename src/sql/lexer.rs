@@ -659,7 +659,7 @@ mod tests {
 
     #[test]
     fn test_create_database_keyword() {
-        let lexer = Lexer::new("CREATE DATABASE mydb");
+        let lexer = Lexer::new("CREATE DATABASE KisechansDB");
         let tokens = lexer.tokenize();
         assert_eq!(tokens[0], Token::CreateDatabase);
         assert!(matches!(tokens[1], Token::Identifier(_)));
@@ -667,14 +667,14 @@ mod tests {
 
     #[test]
     fn test_drop_database_keyword() {
-        let lexer = Lexer::new("DROP DATABASE mydb");
+        let lexer = Lexer::new("DROP DATABASE KisechansDB");
         let tokens = lexer.tokenize();
         assert_eq!(tokens[0], Token::DropDatabase);
     }
 
     #[test]
     fn test_use_database_keyword() {
-        let lexer = Lexer::new("USE mydb");
+        let lexer = Lexer::new("USE KisechansDB");
         let tokens = lexer.tokenize();
         assert_eq!(tokens[0], Token::Use);
         assert!(matches!(tokens[1], Token::Identifier(_)));

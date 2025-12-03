@@ -287,10 +287,10 @@ mod tests {
     #[test]
     fn test_create_database_ast() {
         let stmt = CreateDatabaseStmt {
-            database_name: "mydb".to_string(),
+            database_name: "KisechansDB".to_string(),
             if_not_exists: true,
         };
-        assert_eq!(stmt.database_name, "mydb");
+        assert_eq!(stmt.database_name, "KisechansDB");
         assert_eq!(stmt.if_not_exists, true);
     }
 

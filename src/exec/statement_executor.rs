@@ -34,11 +34,11 @@
 // let mut executor = StatementExecutor::new(&mut db_mgr);
 //
 // // 创建数据库
-// let result = executor.execute("CREATE DATABASE mydb")?;
+// let result = executor.execute("CREATE DATABASE KisechansDB")?;
 // println!("{:?}", result);
 //
 // // 切换数据库
-// let result = executor.execute("USE mydb")?;
+// let result = executor.execute("USE KisechansDB")?;
 //
 // // 查询数据
 // let result = executor.execute("SELECT * FROM users WHERE age > 18")?;

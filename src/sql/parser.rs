@@ -22,7 +22,7 @@
 // ```rust,ignore
 // use db_engine::sql::{Lexer, Parser};
 //
-// let sql = "CREATE DATABASE mydb";
+// let sql = "CREATE DATABASE KisechansDB";
 // let lexer = Lexer::new(sql);
 // let tokens = lexer.tokenize();
 //
@@ -792,11 +792,11 @@ mod tests {
 
     #[test]
     fn test_parse_create_database() {
-        let stmt = parse_sql("CREATE DATABASE mydb").unwrap();
+        let stmt = parse_sql("CREATE DATABASE KisechansDB").unwrap();
         assert_eq!(
             stmt,
             Statement::CreateDatabase(CreateDatabaseStmt {
-                database_name: "mydb".to_string(),
+                database_name: "KisechansDB".to_string(),
                 if_not_exists: false,
             })
         );
@@ -804,11 +804,11 @@ mod tests {
 
     #[test]
     fn test_parse_create_database_if_not_exists() {
-        let stmt = parse_sql("CREATE DATABASE IF NOT EXISTS mydb").unwrap();
+        let stmt = parse_sql("CREATE DATABASE IF NOT EXISTS KisechansDB").unwrap();
         assert_eq!(
             stmt,
             Statement::CreateDatabase(CreateDatabaseStmt {
-                database_name: "mydb".to_string(),
+                database_name: "KisechansDB".to_string(),
                 if_not_exists: true,
             })
         );
@@ -816,11 +816,11 @@ mod tests {
 
     #[test]
     fn test_parse_drop_database() {
-        let stmt = parse_sql("DROP DATABASE mydb").unwrap();
+        let stmt = parse_sql("DROP DATABASE KisechansDB").unwrap();
         assert_eq!(
             stmt,
             Statement::DropDatabase(DropDatabaseStmt {
-                database_name: "mydb".to_string(),
+                database_name: "KisechansDB".to_string(),
                 if_exists: false,
             })
         );
@@ -828,11 +828,11 @@ mod tests {
 
     #[test]
     fn test_parse_drop_database_if_exists() {
-        let stmt = parse_sql("DROP DATABASE IF EXISTS mydb").unwrap();
+        let stmt = parse_sql("DROP DATABASE IF EXISTS KisechansDB").unwrap();
         assert_eq!(
             stmt,
             Statement::DropDatabase(DropDatabaseStmt {
-                database_name: "mydb".to_string(),
+                database_name: "KisechansDB".to_string(),
                 if_exists: true,
             })
         );
@@ -840,11 +840,11 @@ mod tests {
 
     #[test]
     fn test_parse_use_database() {
-        let stmt = parse_sql("USE mydb").unwrap();
+        let stmt = parse_sql("USE KisechansDB").unwrap();
         assert_eq!(
             stmt,
             Statement::UseDatabase(UseDatabaseStmt {
-                database_name: "mydb".to_string(),
+                database_name: "KisechansDB".to_string(),
             })
         );
     }
