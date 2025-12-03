@@ -1,5 +1,7 @@
 pub mod ast;
 pub mod lexer;
+pub mod parser;
 
 pub use ast::{Statement, SelectStmt, Expression, BinaryOperator, Literal, DataType};
 pub use lexer::{Lexer, Token};
+pub use parser::{Parser, ParseError};
