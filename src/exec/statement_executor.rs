@@ -65,8 +65,8 @@ pub enum ExecutionResult {
     // DDL 成功消息（如 "Database created"）
     Success(String),
     
-    // SELECT 查询结果（记录列表）
-    Query(Vec<ExecutorRecord>),
+    // SELECT 查询结果（记录列表 + 表schema）
+    Query(Vec<ExecutorRecord>, crate::rm::types::TableSchema),
     
     // DML 影响的行数（INSERT/UPDATE/DELETE）
     RowsAffected(usize),
@@ -79,7 +79,7 @@ impl std::fmt::Display for ExecutionResult {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             ExecutionResult::Success(msg) => write!(f, "{}", msg),
-            ExecutionResult::Query(records) => {
+            ExecutionResult::Query(records, _schema) => {
                 write!(f, "Query returned {} row(s)", records.len())
             }
             ExecutionResult::RowsAffected(count) => {
@@ -394,7 +394,7 @@ impl<'a> StatementExecutor<'a> {
         };
         
         // 获取表结构（使用 table_manager.catalog）
-        let _schema = match db_context.table_manager.catalog.get_table_schema(table_name) {
+        let schema = match db_context.table_manager.catalog.get_table_schema(table_name) {
             Ok(s) => s,
             Err(e) => return Ok(ExecutionResult::Error(format!("Table '{}' not found: {}", table_name, e))),
         };
@@ -476,8 +476,8 @@ impl<'a> StatementExecutor<'a> {
         
         println!("[SELECT] Found {} rows from table '{}'", rows.len(), table_name);
         
-        // 返回结果
-        Ok(ExecutionResult::Query(rows))
+        // 返回结果（包含schema）
+        Ok(ExecutionResult::Query(rows, schema))
     }
     
     // ========== DML 语句执行 ==========
@@ -551,19 +551,15 @@ impl<'a> StatementExecutor<'a> {
         }
         
         // INSERT 完成后，刷新数据到磁盘
-        println!("[INSERT] Attempting to flush table '{}'...", table_name);
         let db_context = match self.db_manager.current_context_mut() {
             Ok(ctx) => ctx,
             Err(e) => return Ok(ExecutionResult::Error(format!("Failed to get database context: {:?}", e))),
         };
         
         if let Some(table_handler) = db_context.table_manager.open_tables.get_mut(&table_name) {
-            println!("[INSERT] Table handler found, calling flush...");
             if let Err(e) = table_handler.flush() {
                 return Ok(ExecutionResult::Error(format!("Failed to flush table data: {}", e)));
             }
-        } else {
-            println!("[INSERT] WARNING: Table '{}' not in open_tables!", table_name);
         }
         
         Ok(ExecutionResult::Success(

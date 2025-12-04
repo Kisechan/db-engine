@@ -32,8 +32,6 @@ impl TableHandler {
             data_pages.push(page_id);
         }
         
-        println!("[TableHandler] Loaded {} data pages for table '{}'", data_pages.len(), table_name);
-        
         TableHandler {
             table_name,
             schema,
@@ -255,9 +253,7 @@ impl TableHandler {
 
     // 刷新表（把所有脏页写回磁盘）
     pub fn flush(&mut self) -> Result<(), String> {
-        println!("[TableHandler] Flushing table '{}'...", self.table_name);
         self.buffer_manager.flush_all()?;
-        println!("[TableHandler] Table '{}' flushed successfully", self.table_name);
         Ok(())
     }
 

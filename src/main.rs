@@ -71,7 +71,7 @@ fn main() -> Result<(), String> {
 }
 
 fn print_help() {
-    println!("Kisechan's DB-Engine v1.3.0");
+    println!("Kisechan's DB-Engine v1.3.2");
     println!("A relational database engine written in Rust\n");
     println!("USAGE:");
     println!("    cargo run [OPTIONS]\n");

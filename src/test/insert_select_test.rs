@@ -58,7 +58,7 @@ mod tests {
 
         // 验证查询结果
         match result {
-            crate::exec::statement_executor::ExecutionResult::Query(rows) => {
+            crate::exec::statement_executor::ExecutionResult::Query(rows, _schema) => {
                 // 应该返回至少 1 行数据
                 assert_eq!(rows.len(), 1, "Expected 1 row, got {}", rows.len());
                 
@@ -122,7 +122,7 @@ mod tests {
         let result = executor.execute(select_sql).expect("Failed to execute SELECT");
         
         match result {
-            crate::exec::statement_executor::ExecutionResult::Query(rows) => {
+            crate::exec::statement_executor::ExecutionResult::Query(rows, _schema) => {
                 // 应该返回 3 行数据
                 assert_eq!(rows.len(), 3, "Expected 3 rows, got {}", rows.len());
             }
@@ -177,7 +177,7 @@ mod tests {
 
             // 验证数据仍然存在
             match result {
-                crate::exec::statement_executor::ExecutionResult::Query(rows) => {
+                crate::exec::statement_executor::ExecutionResult::Query(rows, _schema) => {
                     assert_eq!(rows.len(), 1, "Data not persisted across sessions, expected 1 row, got {}", rows.len());
                 }
                 crate::exec::statement_executor::ExecutionResult::Error(msg) => {

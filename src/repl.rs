@@ -100,13 +100,13 @@ impl Repl {
     // 构建提示符
     fn build_prompt(&self, buffer: &str) -> String {
         if !buffer.is_empty() {
-            // 多行输入时显示续行提示符
-            "      -> ".to_string()
+            // 多行输入时显示续行提示符（青色）
+            "\x1b[36m      -> \x1b[0m".to_string()
         } else {
             // 显示当前数据库名称
             match self.db_manager.current_database_name() {
-                Some(db_name) => format!("Kisechan's DB-Engine [{}]> ", db_name),
-                None => "Kisechan's DB-Engine> ".to_string(),
+                Some(db_name) => format!("\x1b[1;34mKisechan's DB-Engine\x1b[0m \x1b[33m[{}]\x1b[0m\x1b[1;32m>\x1b[0m ", db_name),
+                None => "\x1b[1;34mKisechan's DB-Engine\x1b[1;32m>\x1b[0m ".to_string(),
             }
         }
     }
@@ -204,11 +204,11 @@ impl Repl {
             ExecutionResult::Success(msg) => {
                 println!("\x1b[32m✓\x1b[0m {}", msg);
             }
-            ExecutionResult::Query(records) => {
+            ExecutionResult::Query(records, schema) => {
                 if records.is_empty() {
                     println!("(0 rows)");
                 } else {
-                    self.print_query_result(&records);
+                    self.print_query_result(&records, &schema);
                     println!("\n({} row{})", records.len(), if records.len() == 1 { "" } else { "s" });
                 }
             }
@@ -222,40 +222,105 @@ impl Repl {
     }
 
     // 打印查询结果（表格格式）
-    fn print_query_result(&self, records: &[crate::exec::iterator::ExecutorRecord]) {
+    fn print_query_result(&self, records: &[crate::exec::iterator::ExecutorRecord], schema: &crate::rm::types::TableSchema) {
         let mut table = Table::new();
         
         // 设置表格格式
         table.set_format(*format::consts::FORMAT_BOX_CHARS);
         
-        // 添加表头（RID + Data 列）
-        table.add_row(Row::new(vec![
-            Cell::new("RID"),
-            Cell::new("Data (hex)"),
-        ]));
+        // 添加表头（使用schema的列名）
+        let mut header_cells = vec![Cell::new("RID")];
+        for col in &schema.columns {
+            header_cells.push(Cell::new(&col.name));
+        }
+        table.add_row(Row::new(header_cells));
         
         // 添加数据行
         for record in records {
             let rid_str = format!("({}, {})", record.rid.page_id, record.rid.slot_id);
-            let data_str = record.data.iter()
-                .take(32) // 限制显示前32字节
-                .map(|b| format!("{:02x}", b))
-                .collect::<Vec<_>>()
-                .join(" ");
+            let mut row_cells = vec![Cell::new(&rid_str)];
             
-            let data_display = if record.data.len() > 32 {
-                format!("{} ... ({} bytes)", data_str, record.data.len())
-            } else {
-                format!("{} ({} bytes)", data_str, record.data.len())
-            };
+            // 解析记录数据
+            match Self::parse_record_data(&record.data, schema) {
+                Ok(values) => {
+                    for value in values {
+                        row_cells.push(Cell::new(&value));
+                    }
+                }
+                Err(e) => {
+                    // 解析失败，显示原始十六进制
+                    eprintln!("[REPL] Failed to parse record: {}", e);
+                    let hex_str = record.data.iter()
+                        .take(32)
+                        .map(|b| format!("{:02x}", b))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    row_cells.push(Cell::new(&format!("Parse error: {}", hex_str)));
+                }
+            }
             
-            table.add_row(Row::new(vec![
-                Cell::new(&rid_str),
-                Cell::new(&data_display),
-            ]));
+            table.add_row(Row::new(row_cells));
         }
         
         table.printstd();
+    }
+    
+    // 解析记录数据为字符串值列表
+    fn parse_record_data(data: &[u8], schema: &crate::rm::types::TableSchema) -> Result<Vec<String>, String> {
+        let mut values = Vec::new();
+        let mut offset = 0;
+        
+        for col in &schema.columns {
+            if offset >= data.len() {
+                return Err(format!("Data too short for column '{}'", col.name));
+            }
+            
+            match &col.data_type {
+                crate::rm::types::DataType::Int32 => {
+                    if offset + 4 > data.len() {
+                        return Err(format!("Not enough data for INT column '{}'", col.name));
+                    }
+                    let bytes = &data[offset..offset + 4];
+                    let value = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                    values.push(value.to_string());
+                    offset += 4;
+                }
+                crate::rm::types::DataType::Char(len) => {
+                    if offset + len > data.len() {
+                        return Err(format!("Not enough data for CHAR({}) column '{}'", len, col.name));
+                    }
+                    let bytes = &data[offset..offset + len];
+                    // 去除尾部的0字节
+                    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+                    match String::from_utf8(bytes[..end].to_vec()) {
+                        Ok(s) => values.push(s),
+                        Err(_) => values.push(format!("<invalid UTF-8>")),
+                    }
+                    offset += len;
+                }
+                crate::rm::types::DataType::VarChar => {
+                    // VARCHAR格式：4字节长度 + 数据
+                    if offset + 4 > data.len() {
+                        return Err(format!("Not enough data for VARCHAR length in column '{}'", col.name));
+                    }
+                    let len_bytes = &data[offset..offset + 4];
+                    let str_len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+                    offset += 4;
+                    
+                    if offset + str_len > data.len() {
+                        return Err(format!("Not enough data for VARCHAR({}) column '{}'", str_len, col.name));
+                    }
+                    let bytes = &data[offset..offset + str_len];
+                    match String::from_utf8(bytes.to_vec()) {
+                        Ok(s) => values.push(s),
+                        Err(_) => values.push(format!("<invalid UTF-8>")),
+                    }
+                    offset += str_len;
+                }
+            }
+        }
+        
+        Ok(values)
     }
 
     // 打印错误信息（红色）
@@ -268,7 +333,7 @@ impl Repl {
         println!("\x1b[1;36m"); // 青色粗体
         println!("╔═══════════════════════════════════════════════════════════════╗");
         println!("║                                                               ║");
-        println!("║                 \x1b[1;33mKisechan's DB-Engine v1.3.0\x1b[1;36m                   ║");
+        println!("║                 \x1b[1;33mKisechan's DB-Engine v1.3.2\x1b[1;36m                   ║");
         println!("║                                                               ║");
         println!("║           A relational database engine written in Rust        ║");
         println!("║                                                               ║");
@@ -378,13 +443,13 @@ mod tests {
         let db_mgr = DatabaseManager::new("./test_data/repl_test2").unwrap();
         let repl = Repl::new(db_mgr).unwrap();
         
-        // 空缓冲区，无数据库
+        // 空缓冲区，无数据库（包含颜色代码）
         let prompt = repl.build_prompt("");
-        assert_eq!(prompt, "Kisechan's DB-Engine> ");
+        assert_eq!(prompt, "\x1b[1;34mKisechan's DB-Engine\x1b[1;32m>\x1b[0m ");
         
-        // 多行输入
+        // 多行输入（包含颜色代码）
         let prompt = repl.build_prompt("SELECT * FROM");
-        assert_eq!(prompt, "      -> ");
+        assert_eq!(prompt, "\x1b[36m      -> \x1b[0m");
         
         // 清理
         let _ = std::fs::remove_dir_all("./test_data/repl_test2");
