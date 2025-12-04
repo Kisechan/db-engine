@@ -185,23 +185,30 @@ impl DatabaseManager {
         // 检查数据库是否已存在
         if db_path.exists() {
             if if_not_exists {
+                log::warn!("Database '{}' already exists, skipping", name);
                 println!("[DatabaseManager] Database '{}' already exists, skipping", name);
                 return Ok(());
             } else {
+                log::error!("Database '{}' already exists", name);
                 return Err(DatabaseError::DatabaseAlreadyExists(name.to_string()));
             }
         }
         
+        log::info!("Creating database: {}", name);
+        
         // 创建数据库目录
         fs::create_dir_all(&db_path)?;
+        log::debug!("Created database directory: {:?}", db_path);
         println!("[DatabaseManager] Created database directory: {:?}", db_path);
         
         // 创建空的 catalog 文件
         let catalog_path = db_path.join("catalog.tbl");
         let empty_data = vec![0u8; 4096]; // 一页空数据
         fs::write(&catalog_path, &empty_data)?;
+        log::debug!("Created empty catalog file: {:?}", catalog_path);
         println!("[DatabaseManager] Created empty catalog file: {:?}", catalog_path);
         
+        log::info!("Database '{}' created successfully", name);
         println!("[DatabaseManager] Database '{}' created successfully", name);
         Ok(())
     }
@@ -290,8 +297,8 @@ impl DatabaseManager {
                 format!("Failed to initialize catalog: {}", e)
             ))?;
         
-        // 创建 TableManager
-        let table_manager = TableManager::new(catalog_for_table_mgr)
+        // 创建 TableManager（传入数据库路径）
+        let table_manager = TableManager::new(catalog_for_table_mgr, db_path.clone())
             .map_err(|e| DatabaseError::InitializationError(
                 format!("Failed to initialize table manager: {}", e)
             ))?;
@@ -374,9 +381,9 @@ impl DatabaseManager {
     pub fn close_all(&mut self) -> Result<(), DatabaseError> {
         println!("[DatabaseManager] Closing all databases...");
         
-        // 刷新所有数据库的 catalog
-        for (name, context) in &self.databases {
-            if let Err(e) = context.catalog.flush_to_disk() {
+        // 刷新所有数据库的 catalog（使用 table_manager.catalog 而不是 context.catalog）
+        for (name, context) in &mut self.databases {
+            if let Err(e) = context.table_manager.catalog.flush_to_disk() {
                 eprintln!("[DatabaseManager] Failed to flush catalog for database '{}': {}", name, e);
             }
         }

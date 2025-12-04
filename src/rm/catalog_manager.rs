@@ -116,10 +116,10 @@ impl CatalogManager {
         let encoded = bincode::serialize(&self.schemas)
             .map_err(|e| format!("Failed to serialize catalog: {}", e))?;
 
-        // 检查大小是否超过页大小
-        if encoded.len() > PAGE_SIZE {
+        // 检查大小是否超过页大小（预留8字节存储长度）
+        if encoded.len() + 8 > PAGE_SIZE {
             return Err(format!(
-                "Catalog size {} exceeds page size {}",
+                "Catalog size {} exceeds page size {} (with 8-byte header)",
                 encoded.len(),
                 PAGE_SIZE
             ));
@@ -131,9 +131,15 @@ impl CatalogManager {
         DiskManager::create_file(catalog_file)
             .map_err(|e| format!("Failed to create catalog file: {}", e))?;
 
-        // 将序列化数据填充到一整页
+        // 创建页数据：前8字节存储数据长度，后面是实际数据
         let mut page_data = vec![0u8; PAGE_SIZE];
-        page_data[..encoded.len()].copy_from_slice(&encoded);
+        
+        // 写入数据长度（u64, little-endian）
+        let len_bytes = (encoded.len() as u64).to_le_bytes();
+        page_data[..8].copy_from_slice(&len_bytes);
+        
+        // 写入实际数据
+        page_data[8..8+encoded.len()].copy_from_slice(&encoded);
 
         // 写入第0页
         DiskManager::write_page(catalog_file, 0, &page_data)
@@ -180,11 +186,18 @@ impl CatalogManager {
             return Ok(());
         }
         
-        // 找到真实数据长度（去除尾部 0 字节）
-        let end = buffer.iter().rposition(|&b| b != 0).unwrap_or(0) + 1;
+        // 读取数据长度（前8字节）
+        let len_bytes: [u8; 8] = buffer[..8].try_into()
+            .map_err(|_| "Failed to read length header")?;
+        let data_len = u64::from_le_bytes(len_bytes) as usize;
+        
+        // 检查长度是否合理
+        if data_len == 0 || data_len + 8 > PAGE_SIZE {
+            return Err(format!("Invalid catalog data length: {}", data_len));
+        }
 
-        // 反序列化数据
-        let bytes = &buffer[..end];
+        // 反序列化数据（跳过前8字节的长度头）
+        let bytes = &buffer[8..8+data_len];
         let schemas: HashMap<String, TableSchema> = bincode::deserialize(bytes)
             .map_err(|e| format!("Failed to deserialize catalog: {}", e))?;
 

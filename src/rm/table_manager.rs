@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use crate::rm::types::TableSchema;
 use crate::rm::catalog_manager::CatalogManager;
 use crate::rm::table_handler::TableHandler;
@@ -14,13 +15,17 @@ pub struct TableManager {
 
     // 已打开表：表名 -> TableHandler
     pub open_tables: HashMap<String, TableHandler>,
+    
+    // 数据库路径
+    pub db_path: PathBuf,
 }
 
 impl TableManager {
-    pub fn new(catalog: CatalogManager) -> Result<Self, String> {
+    pub fn new(catalog: CatalogManager, db_path: PathBuf) -> Result<Self, String> {
         Ok(TableManager {
             catalog,
             open_tables: HashMap::new(),
+            db_path,
         })
     }
 
@@ -36,22 +41,24 @@ impl TableManager {
         // 向 catalog 注册 schema
         self.catalog.create_table(schema)?;
 
-        // 创建数据文件
-        let file_path = format!("data/{}.tbl", table_name);
-        DiskManager::create_file(&file_path)
+        // 创建数据文件（使用数据库路径）
+        let file_path = self.db_path.join(format!("{}.tbl", table_name));
+        let file_path_str = file_path.to_str()
+            .ok_or_else(|| "Invalid file path".to_string())?;
+        DiskManager::create_file(file_path_str)
             .map_err(|e| format!("Failed to create data file for table '{}': {}", table_name, e))?;
 
         // 初始化 FileHeader
         let mut default_header = FileHeader::default();
         
         // 创建文件句柄
-        let file_handler = FileHandler::new(file_path.clone(), default_header);
+        let file_handler = FileHandler::new(file_path_str.to_string(), default_header);
         
         // 将文件头写入第0页（非常重要！）
         file_handler.flush_header()
             .map_err(|e| format!("Failed to flush header for table '{}': {}", table_name, e))?;
 
-        println!("[TableManager] Created table file: {} with initialized header", file_path);
+        println!("[TableManager] Created table file: {} with initialized header", file_path_str);
 
         Ok(())
     }
@@ -68,23 +75,25 @@ impl TableManager {
             .ok_or(format!("Table '{}' not found in catalog", table_name))?
             .clone();
 
-        // 构造数据文件路径
-        let file_path = format!("data/{}.tbl", table_name);
+        // 构造数据文件路径（使用数据库路径）
+        let file_path = self.db_path.join(format!("{}.tbl", table_name));
+        let file_path_str = file_path.to_str()
+            .ok_or_else(|| "Invalid file path".to_string())?;
 
         // 检查文件是否存在
-        if !DiskManager::file_exists(&file_path) {
-            return Err(format!("Data file for table '{}' not found at {}", table_name, file_path));
+        if !DiskManager::file_exists(file_path_str) {
+            return Err(format!("Data file for table '{}' not found at {}", table_name, file_path_str));
         }
 
         // 加载文件头
-        let file_header = FileHandler::load_header(&file_path)
+        let file_header = FileHandler::load_header(file_path_str)
             .map_err(|e| format!("Failed to load header for table '{}': {}", table_name, e))?;
 
-        // 创建 FileHandler
-        let file_handler = FileHandler::new(file_path.clone(), file_header);
+        // 创建 FileHandler（使用字符串路径）
+        let file_handler = FileHandler::new(file_path_str.to_string(), file_header);
 
-        // 创建 TableHandler 并加入 open_tables
-        let table_handler = TableHandler::new(table_name.to_string(), schema, file_handler);
+        // 创建 TableHandler 并加入 open_tables（传入完整路径）
+        let table_handler = TableHandler::new(table_name.to_string(), schema, file_handler, file_path_str.to_string());
         self.open_tables.insert(table_name.to_string(), table_handler);
 
         println!("[TableManager] Opened table: {}", table_name);

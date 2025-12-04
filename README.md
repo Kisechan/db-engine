@@ -14,6 +14,12 @@ cargo run
 
 # 生产模式（推荐，性能更好）
 cargo run --release
+
+# 启用日志（开发调试）
+RUST_LOG=debug cargo run
+
+# 启用日志（生产环境）
+RUST_LOG=info cargo run --release
 ```
 
 启动后会看到欢迎界面，可以输入 SQL 命令进行数据库操作。
@@ -22,6 +28,9 @@ cargo run --release
 
 ```bash
 cargo run -- --test
+
+# 运行测试并查看日志
+RUST_LOG=debug cargo run -- --test
 ```
 
 ### 查看帮助
@@ -29,6 +38,30 @@ cargo run -- --test
 ```bash
 cargo run -- --help
 ```
+
+## 日志系统
+
+项目集成了完整的日志系统，支持通过 `RUST_LOG` 环境变量控制日志级别：
+
+```bash
+# 开发调试 - 显示详细日志
+RUST_LOG=debug cargo run
+
+# 生产环境 - 只显示重要信息
+RUST_LOG=info cargo run --release
+
+# 只显示错误
+RUST_LOG=error cargo run
+
+# 针对特定模块
+RUST_LOG=db_engine::rm=debug cargo run
+```
+
+日志级别说明：
+- **ERROR**: 错误信息（数据库操作失败、解析错误）
+- **WARN**: 警告信息（资源已存在等）
+- **INFO**: 重要操作（创建/删除数据库、切换数据库）
+- **DEBUG**: 调试信息（SQL 执行、查询计划、优化过程）
 
 ## 功能实现
 

@@ -109,15 +109,9 @@ impl Parser {
             Token::CreateTable => self.parse_create_table(),
             Token::DropTable => self.parse_drop_table(),
             Token::Select => self.parse_select(),
-            Token::Insert => Err(ParseError::UnsupportedFeature {
-                feature: "INSERT statement".to_string(),
-            }),
-            Token::Update => Err(ParseError::UnsupportedFeature {
-                feature: "UPDATE statement".to_string(),
-            }),
-            Token::Delete => Err(ParseError::UnsupportedFeature {
-                feature: "DELETE statement".to_string(),
-            }),
+            Token::Insert => self.parse_insert(),
+            Token::Update => self.parse_update(),
+            Token::Delete => self.parse_delete(),
             Token::Eof => Err(ParseError::UnexpectedEof {
                 expected: "SQL statement".to_string(),
             }),
@@ -773,6 +767,181 @@ impl Parser {
             Token::Slash => Some(BinaryOperator::Div),
             Token::Percent => Some(BinaryOperator::Mod),
             _ => None,
+        }
+    }
+    
+    // ========== DML 语句解析 (INSERT/UPDATE/DELETE) ==========
+    
+    // 解析 INSERT INTO table [(columns)] VALUES (values)
+    fn parse_insert(&mut self) -> Result<Statement, ParseError> {
+        self.expect(&Token::Insert)?;
+        self.expect(&Token::Into)?;
+        
+        // 获取表名
+        let table_name = self.expect_identifier()?;
+        
+        // 解析可选的列名列表
+        let columns = if self.match_token(&Token::LeftParen) {
+            self.advance();
+            let mut cols = Vec::new();
+            
+            loop {
+                let col = self.expect_identifier()?;
+                cols.push(col);
+                
+                if self.match_token(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            
+            self.expect(&Token::RightParen)?;
+            Some(cols)
+        } else {
+            None
+        };
+        
+        // 解析 VALUES
+        self.expect(&Token::Values)?;
+        
+        // 解析值列表
+        let mut values = Vec::new();
+        
+        loop {
+            self.expect(&Token::LeftParen)?;
+            let mut row = Vec::new();
+            
+            loop {
+                let literal = self.parse_literal()?;
+                row.push(literal);
+                
+                if self.match_token(&Token::Comma) {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            
+            self.expect(&Token::RightParen)?;
+            values.push(row);
+            
+            // 检查是否有更多行
+            if self.match_token(&Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        
+        Ok(Statement::Insert(InsertStmt {
+            table_name,
+            columns,
+            values,
+        }))
+    }
+    
+    // 解析 UPDATE table SET col1=val1, col2=val2 [WHERE condition]
+    fn parse_update(&mut self) -> Result<Statement, ParseError> {
+        self.expect(&Token::Update)?;
+        
+        // 获取表名
+        let table_name = self.expect_identifier()?;
+        
+        // 解析 SET
+        self.expect(&Token::Set)?;
+        
+        // 解析赋值列表
+        let mut assignments = Vec::new();
+        
+        loop {
+            let column = self.expect_identifier()?;
+            self.expect(&Token::Equal)?;
+            let value = self.parse_expression()?;
+            
+            assignments.push((column, value));
+            
+            if self.match_token(&Token::Comma) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        
+        // 解析可选的 WHERE 子句
+        let where_clause = if self.match_token(&Token::Where) {
+            self.advance();
+            let condition = self.parse_expression()?;
+            Some(WhereClause { condition })
+        } else {
+            None
+        };
+        
+        Ok(Statement::Update(UpdateStmt {
+            table_name,
+            assignments,
+            where_clause,
+        }))
+    }
+    
+    // 解析 DELETE FROM table [WHERE condition]
+    fn parse_delete(&mut self) -> Result<Statement, ParseError> {
+        self.expect(&Token::Delete)?;
+        self.expect(&Token::From)?;
+        
+        // 获取表名
+        let table_name = self.expect_identifier()?;
+        
+        // 解析可选的 WHERE 子句
+        let where_clause = if self.match_token(&Token::Where) {
+            self.advance();
+            let condition = self.parse_expression()?;
+            Some(WhereClause { condition })
+        } else {
+            None
+        };
+        
+        Ok(Statement::Delete(DeleteStmt {
+            table_name,
+            where_clause,
+        }))
+    }
+    
+    // 解析字面量
+    fn parse_literal(&mut self) -> Result<Literal, ParseError> {
+        match self.peek() {
+            Token::Integer(n) => {
+                let num = *n;
+                self.advance();
+                Ok(Literal::Integer(num))
+            }
+            Token::Float(f) => {
+                let fval = *f;
+                self.advance();
+                Ok(Literal::Float(fval))
+            }
+            Token::String(s) => {
+                let str = s.clone();
+                self.advance();
+                Ok(Literal::String(str))
+            }
+            Token::True => {
+                self.advance();
+                Ok(Literal::Boolean(true))
+            }
+            Token::False => {
+                self.advance();
+                Ok(Literal::Boolean(false))
+            }
+            Token::Null => {
+                self.advance();
+                Ok(Literal::Null)
+            }
+            token => Err(ParseError::UnexpectedToken {
+                expected: "literal value".to_string(),
+                found: token.clone(),
+                position: self.current,
+            }),
         }
     }
 }

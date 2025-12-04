@@ -50,8 +50,10 @@
 // ```
 //
 use crate::rm::database_manager::{DatabaseManager, DatabaseError};
+use crate::rm::types::{TableSchema, DataType};
 use crate::sql::lexer::Lexer;
-use crate::sql::ast::{Statement, CreateDatabaseStmt, DropDatabaseStmt, UseDatabaseStmt};
+use crate::sql::ast::{Statement, CreateDatabaseStmt, DropDatabaseStmt, UseDatabaseStmt, 
+                      InsertStmt, UpdateStmt, DeleteStmt, Literal};
 use crate::plan::planner::{Planner, PlannerError};
 use crate::plan::optimizer::Optimizer;
 use crate::plan::physical::{PhysicalPlanner, PhysicalPlannerError};
@@ -167,6 +169,8 @@ impl<'a> StatementExecutor<'a> {
     // 2. 语法分析：将 Token 流转换为 AST
     // 3. 语句分发：根据 Statement 类型执行对应的逻辑
     pub fn execute(&mut self, sql: &str) -> Result<ExecutionResult, ExecutorError> {
+        log::debug!("Executing SQL: {}", sql);
+        
         // 步骤 1：词法分析
         let lexer = Lexer::new(sql);
         let tokens = lexer.tokenize();
@@ -175,11 +179,22 @@ impl<'a> StatementExecutor<'a> {
         let mut parser = crate::sql::parser::Parser::new(tokens);
         let statement = match parser.parse() {
             Ok(stmt) => stmt,
-            Err(e) => return Ok(ExecutionResult::Error(format!("Parse error: {}", e))),
+            Err(e) => {
+                log::error!("Parse error: {}", e);
+                return Ok(ExecutionResult::Error(format!("Parse error: {}", e)));
+            }
         };
 
         // 步骤 3：执行语句
-        self.execute_statement(statement)
+        let result = self.execute_statement(statement);
+        
+        match &result {
+            Ok(ExecutionResult::Error(err)) => log::error!("Execution failed: {}", err),
+            Err(err) => log::error!("Execution error: {:?}", err),
+            Ok(_) => log::debug!("Execution successful"),
+        }
+        
+        result
     }
 
     // 执行已解析的 SQL 语句（AST）
@@ -206,16 +221,10 @@ impl<'a> StatementExecutor<'a> {
             // 查询语句
             Statement::Select(stmt) => self.execute_select(stmt),
             
-            // DML 语句（暂未实现）
-            Statement::Insert(_) => Ok(ExecutionResult::Error(
-                "INSERT statement not implemented yet".to_string()
-            )),
-            Statement::Update(_) => Ok(ExecutionResult::Error(
-                "UPDATE statement not implemented yet".to_string()
-            )),
-            Statement::Delete(_) => Ok(ExecutionResult::Error(
-                "DELETE statement not implemented yet".to_string()
-            )),
+            // DML 语句
+            Statement::Insert(stmt) => self.execute_insert(stmt),
+            Statement::Update(stmt) => self.execute_update(stmt),
+            Statement::Delete(stmt) => self.execute_delete(stmt),
         }
     }
 
@@ -366,63 +375,293 @@ impl<'a> StatementExecutor<'a> {
 
     // 执行 SELECT 查询
     fn execute_select(&mut self, stmt: crate::sql::ast::SelectStmt) -> Result<ExecutionResult, ExecutorError> {
-        // 由于 Planner 和 PhysicalPlanner 需要拥有 catalog 和 table_manager，
-        // 而它们不支持 Clone，我们暂时返回未实现错误
-        // TODO: 重构 Planner 和 PhysicalPlanner 使用引用而非所有权
+        // 简化版 SELECT 实现：仅支持 SELECT * FROM table（无 WHERE/JOIN）
         
-        Ok(ExecutionResult::Error(
-            "SELECT query execution not fully implemented yet. \
-             Requires refactoring Planner and PhysicalPlanner to use references.".to_string()
-        ))
+        // 检查是否有 FROM 子句
+        let table_name = match &stmt.from_table {
+            Some(name) => name,
+            None => return Ok(ExecutionResult::Error("SELECT must have FROM clause".to_string())),
+        };
         
-        /* 原计划实现（需要 Clone 支持）:
-        
-        // 检查是否选择了数据库
-        let context = match self.db_manager.current_context() {
-            Ok(ctx) => ctx,
-            Err(_) => return Ok(ExecutionResult::Error(
-                "No database selected. Use 'USE database_name' first".to_string()
-            )),
-        };
-
-        // 步骤 1：生成逻辑计划
-        let planner = Planner::new(context.catalog.clone());
-        let logical_plan = match planner.plan_select(&stmt) {
-            Ok(plan) => plan,
-            Err(e) => return Ok(ExecutionResult::Error(format!("Planner error: {}", e))),
-        };
-
-        println!("[StatementExecutor] Logical plan: {:?}", logical_plan);
-
-        // 步骤 2：优化逻辑计划
-        let optimized_plan = Optimizer::optimize(logical_plan);
-        println!("[StatementExecutor] Optimized plan: {:?}", optimized_plan);
-
-        // 步骤 3：生成物理计划（执行器树）
-        let mut physical_planner = PhysicalPlanner::new(context.table_manager.clone());
-        let mut executor = match physical_planner.plan(optimized_plan) {
-            Ok(exec) => exec,
-            Err(e) => return Ok(ExecutionResult::Error(format!("Physical planner error: {}", e))),
-        };
-
-        // 步骤 4：执行查询
-        match executor.init() {
-            Ok(()) => {},
-            Err(e) => return Ok(ExecutionResult::Error(format!("Executor init error: {}", e))),
+        if stmt.where_clause.is_some() {
+            return Ok(ExecutionResult::Error("WHERE clause not supported in simplified SELECT".to_string()));
         }
-
-        let mut results = Vec::new();
-        loop {
-            match executor.next() {
-                Ok(Some(record)) => results.push(record),
-                Ok(None) => break,
-                Err(e) => return Ok(ExecutionResult::Error(format!("Executor error: {}", e))),
+        
+        // 获取数据库上下文
+        let db_context = match self.db_manager.current_context_mut() {
+            Ok(ctx) => ctx,
+            Err(_) => return Ok(ExecutionResult::Error("No database selected".to_string())),
+        };
+        
+        // 获取表结构（使用 table_manager.catalog）
+        let _schema = match db_context.table_manager.catalog.get_table_schema(table_name) {
+            Ok(s) => s,
+            Err(e) => return Ok(ExecutionResult::Error(format!("Table '{}' not found: {}", table_name, e))),
+        };
+        
+        // 获取或打开表
+        if !db_context.table_manager.open_tables.contains_key(table_name) {
+            // 表未打开，自动打开
+            if let Err(e) = db_context.table_manager.open_table(table_name) {
+                return Ok(ExecutionResult::Error(
+                    format!("Failed to open table '{}': {}", table_name, e)
+                ));
             }
         }
-
-        println!("[StatementExecutor] Query returned {} row(s)", results.len());
-        Ok(ExecutionResult::Query(results))
-        */
+        
+        let table_handler = db_context.table_manager.open_tables.get_mut(table_name)
+            .expect("Table should be opened");
+        
+        // 扫描所有记录
+        let mut rows: Vec<ExecutorRecord> = Vec::new();
+        
+        // 遍历所有数据页
+        for &page_id in table_handler.data_pages.clone().iter() {
+            // 读取页面上的有效记录的 RIDs
+            let rids_to_read: Vec<crate::common::types::RID> = {
+                let page_buf = match table_handler.buffer_manager.fetch_page(page_id) {
+                    Ok(buf) => buf,
+                    Err(e) => {
+                        eprintln!("[SELECT] Failed to fetch page {}: {}", page_id, e);
+                        continue;
+                    }
+                };
+                
+                // 解析页面记录
+                let page_handler = crate::pm::page_handler::PageHandler::new(page_buf, page_id);
+                let page_header = match page_handler.read_header() {
+                    Ok(h) => h,
+                    Err(e) => {
+                        eprintln!("[SELECT] Failed to read page header: {}", e);
+                        table_handler.buffer_manager.unpin_page(page_id, false).ok();
+                        continue;
+                    }
+                };
+                
+                let mut valid_rids = Vec::new();
+                
+                // 读取每个 slot
+                for slot_id in 0..page_header.slot_count {
+                    let rid = crate::common::types::RID { page_id, slot_id };
+                    
+                    // 跳过已删除的记录
+                    if let Ok(slot) = page_handler.read_slot(slot_id) {
+                        if slot.offset != -1 {
+                            valid_rids.push(rid);
+                        }
+                    }
+                }
+                
+                // unpin 页面
+                table_handler.buffer_manager.unpin_page(page_id, false).ok();
+                
+                valid_rids
+            };
+            
+            // 读取记录数据
+            for rid in rids_to_read {
+                match table_handler.get(rid) {
+                    Ok(record_bytes) => {
+                        rows.push(ExecutorRecord {
+                            rid,
+                            data: record_bytes,
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("[SELECT] Failed to read record {:?}: {}", rid, e);
+                    }
+                }
+            }
+        }
+        
+        println!("[SELECT] Found {} rows from table '{}'", rows.len(), table_name);
+        
+        // 返回结果
+        Ok(ExecutionResult::Query(rows))
+    }
+    
+    // ========== DML 语句执行 ==========
+    
+    // 执行 INSERT 语句
+    fn execute_insert(&mut self, stmt: InsertStmt) -> Result<ExecutionResult, ExecutorError> {
+        // 检查是否选择了数据库
+        let table_name = stmt.table_name.clone();
+        
+        // 获取表结构（使用不可变引用）
+        let schema = {
+            let db_context = match self.db_manager.current_context() {
+                Ok(ctx) => ctx,
+                Err(_) => return Ok(ExecutionResult::Error("No database selected. Use 'USE database_name' first".to_string())),
+            };
+            
+            // 使用 table_manager.catalog，因为 CREATE TABLE 修改的是这个实例
+            match db_context.table_manager.catalog.get_table_schema(&table_name) {
+                Ok(s) => s,
+                Err(e) => return Ok(ExecutionResult::Error(format!("Table '{}' not found: {}", table_name, e))),
+            }
+        };
+        
+        // 验证列数
+        let column_count = if let Some(ref cols) = stmt.columns {
+            cols.len()
+        } else {
+            schema.columns.len()
+        };
+        
+        let mut inserted_count = 0;
+        
+        // 插入每一行数据
+        for row in &stmt.values {
+            if row.len() != column_count {
+                return Ok(ExecutionResult::Error(
+                    format!("Column count mismatch: expected {}, got {}", column_count, row.len())
+                ));
+            }
+            
+            // 将字面量转换为字节数据
+            let record = match self.literals_to_record(&schema, &stmt.columns, row) {
+                Ok(r) => r,
+                Err(e) => return Ok(ExecutionResult::Error(format!("Failed to convert values: {}", e))),
+            };
+            
+            // 插入记录
+            let db_context = match self.db_manager.current_context_mut() {
+                Ok(ctx) => ctx,
+                Err(e) => return Ok(ExecutionResult::Error(format!("Failed to get database context: {:?}", e))),
+            };
+            
+            // 获取或打开表
+            if !db_context.table_manager.open_tables.contains_key(&table_name) {
+                // 表未打开，需要打开
+                if let Err(e) = db_context.table_manager.open_table(&table_name) {
+                    return Ok(ExecutionResult::Error(
+                        format!("Failed to open table '{}': {}", table_name, e)
+                    ));
+                }
+            }
+            
+            let table_handler = db_context.table_manager.open_tables.get_mut(&table_name)
+                .expect("Table should be opened");
+            
+            // 插入记录
+            match table_handler.insert(&record) {
+                Ok(_rid) => inserted_count += 1,
+                Err(e) => return Ok(ExecutionResult::Error(format!("Failed to insert record: {}", e))),
+            }
+        }
+        
+        // INSERT 完成后，刷新数据到磁盘
+        println!("[INSERT] Attempting to flush table '{}'...", table_name);
+        let db_context = match self.db_manager.current_context_mut() {
+            Ok(ctx) => ctx,
+            Err(e) => return Ok(ExecutionResult::Error(format!("Failed to get database context: {:?}", e))),
+        };
+        
+        if let Some(table_handler) = db_context.table_manager.open_tables.get_mut(&table_name) {
+            println!("[INSERT] Table handler found, calling flush...");
+            if let Err(e) = table_handler.flush() {
+                return Ok(ExecutionResult::Error(format!("Failed to flush table data: {}", e)));
+            }
+        } else {
+            println!("[INSERT] WARNING: Table '{}' not in open_tables!", table_name);
+        }
+        
+        Ok(ExecutionResult::Success(
+            format!("{} row(s) inserted into '{}'", inserted_count, table_name)
+        ))
+    }
+    
+    // 执行 UPDATE 语句
+    fn execute_update(&mut self, _stmt: UpdateStmt) -> Result<ExecutionResult, ExecutorError> {
+        Ok(ExecutionResult::Error(
+            "UPDATE statement not fully implemented yet".to_string()
+        ))
+    }
+    
+    // 执行 DELETE 语句  
+    fn execute_delete(&mut self, _stmt: DeleteStmt) -> Result<ExecutionResult, ExecutorError> {
+        Ok(ExecutionResult::Error(
+            "DELETE statement not fully implemented yet".to_string()
+        ))
+    }
+    
+    // 辅助方法：将字面量列表转换为记录字节
+    fn literals_to_record(
+        &self,
+        schema: &TableSchema,
+        columns: &Option<Vec<String>>,
+        values: &[Literal],
+    ) -> Result<Vec<u8>, String> {
+        let mut record = Vec::new();
+        
+        // 如果指定了列名，需要按表结构顺序填充
+        if let Some(col_names) = columns {
+            // 创建列名到值的映射
+            let mut value_map: std::collections::HashMap<&str, &Literal> = std::collections::HashMap::new();
+            for (i, col_name) in col_names.iter().enumerate() {
+                value_map.insert(col_name.as_str(), &values[i]);
+            }
+            
+            // 按表结构顺序填充值
+            for col_def in &schema.columns {
+                if let Some(literal) = value_map.get(col_def.name.as_str()) {
+                    self.append_literal_to_record(&mut record, literal, &col_def.data_type)?;
+                } else {
+                    return Err(format!("Missing value for column '{}'", col_def.name));
+                }
+            }
+        } else {
+            // 没有指定列名，按顺序填充
+            if values.len() != schema.columns.len() {
+                return Err(format!(
+                    "Column count mismatch: table has {} columns, got {} values",
+                    schema.columns.len(),
+                    values.len()
+                ));
+            }
+            
+            for (i, literal) in values.iter().enumerate() {
+                self.append_literal_to_record(&mut record, literal, &schema.columns[i].data_type)?;
+            }
+        }
+        
+        Ok(record)
+    }
+    
+    // 辅助方法：将单个字面量添加到记录中
+    fn append_literal_to_record(
+        &self,
+        record: &mut Vec<u8>,
+        literal: &Literal,
+        data_type: &DataType,
+    ) -> Result<(), String> {
+        match (literal, data_type) {
+            (Literal::Integer(n), DataType::Int32) => {
+                record.extend_from_slice(&(*n as i32).to_le_bytes());
+                Ok(())
+            }
+            (Literal::Boolean(b), DataType::Int32) => {
+                // 布尔值存储为 INT (0 或 1)
+                let val = if *b { 1i32 } else { 0i32 };
+                record.extend_from_slice(&val.to_le_bytes());
+                Ok(())
+            }
+            (Literal::String(s), DataType::VarChar) => {
+                // VARCHAR: 存储为 4 字节长度 + 字符串内容
+                let bytes = s.as_bytes();
+                record.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+                record.extend_from_slice(bytes);
+                Ok(())
+            }
+            (Literal::Null, _) => {
+                // NULL 值的处理（简化版：使用特殊标记）
+                Err("NULL values not fully supported yet".to_string())
+            }
+            _ => Err(format!(
+                "Type mismatch: cannot convert {:?} to {:?}",
+                literal, data_type
+            )),
+        }
     }
 }
 

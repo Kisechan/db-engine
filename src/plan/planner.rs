@@ -57,6 +57,8 @@ impl Planner {
 
     // 将 SelectStmt 转换为逻辑计划树
     pub fn plan_select(&self, stmt: &SelectStmt) -> Result<LogicalPlan, PlannerError> {
+        log::debug!("Planning SELECT statement");
+        
         // 检查 SELECT 字段是否为空
         if stmt.fields.is_empty() {
             return Err(PlannerError::EmptySelectFields);
@@ -90,6 +92,7 @@ impl Planner {
             columns,
         };
 
+        log::debug!("Generated logical plan: {:?}", plan);
         Ok(plan)
     }
 

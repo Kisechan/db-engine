@@ -13,8 +13,12 @@ pub struct Optimizer;
 impl Optimizer {
     // 优化逻辑计划
     pub fn optimize(plan: LogicalPlan) -> LogicalPlan {
+        log::debug!("Optimizing logical plan: {:?}", plan);
+        
         // 先进行谓词下推
         let pushed = Self::pushdown_predicates(plan);
+        
+        log::debug!("Optimized plan: {:?}", pushed);
         
         // 未来可以添加其他优化：
         // - 列投影下推

@@ -15,6 +15,9 @@ use rm::database_manager::DatabaseManager;
 use std::env;
 
 fn main() -> Result<(), String> {
+    // 初始化日志系统
+    env_logger::init();
+    
     let args: Vec<String> = env::args().collect();
     
     // 解析命令行参数

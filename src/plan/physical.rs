@@ -121,7 +121,7 @@ mod tests {
     fn test_physical_planner_simple_scan() {
         // 创建测试用的 table_manager
         let catalog = CatalogManager::default();
-        let table_manager = TableManager::new(catalog).expect("Failed to create table_manager");
+        let table_manager = TableManager::new(catalog, std::path::PathBuf::from(".")).expect("Failed to create table_manager");
 
         let mut planner = PhysicalPlanner::new(table_manager);
 
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_physical_planner_with_filter() {
         let catalog = CatalogManager::default();
-        let table_manager = TableManager::new(catalog).expect("Failed to create table_manager");
+        let table_manager = TableManager::new(catalog, std::path::PathBuf::from(".")).expect("Failed to create table_manager");
 
         let mut planner = PhysicalPlanner::new(table_manager);
 
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     fn test_physical_planner_with_join() {
         let catalog = CatalogManager::default();
-        let table_manager = TableManager::new(catalog).expect("Failed to create table_manager");
+        let table_manager = TableManager::new(catalog, std::path::PathBuf::from(".")).expect("Failed to create table_manager");
 
         let mut planner = PhysicalPlanner::new(table_manager);
 

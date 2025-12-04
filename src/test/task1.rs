@@ -96,7 +96,7 @@ pub fn task1() -> Result<(), String> {
     println!("Catalog initialized.");
     let logger = TransactionLogger::new(1024 * 100 * 4);
     println!("Logger initialized.");
-    let table_manager = TableManager::new(catalog)?;
+    let table_manager = TableManager::new(catalog, "./data".into())?;
     println!("TableManager initialized.");
     let mut rm = RecordManager::new(table_manager, logger);
     println!("RecordManager initialized.");

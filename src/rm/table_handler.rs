@@ -22,13 +22,23 @@ pub struct TableHandler {
 }
 
 impl TableHandler {
-    pub fn new(table_name: String, schema: TableSchema, file_handler: FileHandler) -> Self {
-        let bm = BufferManager::new(128, format!("data/{}.tbl", table_name));
+    pub fn new(table_name: String, schema: TableSchema, file_handler: FileHandler, file_path: String) -> Self {
+        let bm = BufferManager::new(128, file_path);
+        
+        // 从 FileHeader 加载数据页列表
+        // 页0是 header，页1+ 是数据页
+        let mut data_pages = Vec::new();
+        for page_id in 1..file_handler.header.total_pages {
+            data_pages.push(page_id);
+        }
+        
+        println!("[TableHandler] Loaded {} data pages for table '{}'", data_pages.len(), table_name);
+        
         TableHandler {
             table_name,
             schema,
             file_handler,
-            data_pages: Vec::new(),
+            data_pages,
             buffer_manager: bm,
         }
     }
@@ -245,7 +255,10 @@ impl TableHandler {
 
     // 刷新表（把所有脏页写回磁盘）
     pub fn flush(&mut self) -> Result<(), String> {
-        self.buffer_manager.flush_all()
+        println!("[TableHandler] Flushing table '{}'...", self.table_name);
+        self.buffer_manager.flush_all()?;
+        println!("[TableHandler] Table '{}' flushed successfully", self.table_name);
+        Ok(())
     }
 
     // 获取所有数据页

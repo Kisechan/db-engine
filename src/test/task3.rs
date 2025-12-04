@@ -248,7 +248,7 @@ pub fn task3() -> Result<(), String> {
     let logger = TransactionLogger::new(1024 * 100 * 4);
     println!("[Init] Logger initialized");
     
-    let table_manager = TableManager::new(catalog)?;
+    let table_manager = TableManager::new(catalog, "./data".into())?;
     println!("[Init] TableManager initialized");
     
     let mut rm = RecordManager::new(table_manager, logger);

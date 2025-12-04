@@ -268,16 +268,16 @@ impl Repl {
         println!("\x1b[1;36m"); // 青色粗体
         println!("╔═══════════════════════════════════════════════════════════════╗");
         println!("║                                                               ║");
-        println!("║            \x1b[1;33mKisechan's DB-Engine v1.3.0\x1b[1;36m                        ║");
+        println!("║                 \x1b[1;33mKisechan's DB-Engine v1.3.0\x1b[1;36m                   ║");
         println!("║                                                               ║");
-        println!("║   A lightweight relational database engine written in Rust    ║");
+        println!("║           A relational database engine written in Rust        ║");
         println!("║                                                               ║");
         println!("╠═══════════════════════════════════════════════════════════════╣");
         println!("║                                                               ║");
-        println!("║  \x1b[1;32m🔗 GitHub:\x1b[1;36m https://github.com/Kisechan/db-engine             ║");
+        println!("║  \x1b[1;32m      GitHub:\x1b[1;36m https://github.com/Kisechan/db-engine          ║");
         println!("║                                                               ║");
-        println!("║  \x1b[1;35m💡 Type .help to see available commands\x1b[1;36m                      ║");
-        println!("║  \x1b[1;35m💡 Type .exit or press Ctrl+D to quit\x1b[1;36m                        ║");
+        println!("║  \x1b[1;35m      Type .help to see available commands\x1b[1;36m                   ║");
+        println!("║  \x1b[1;35m      Type .exit or press Ctrl+D to quit\x1b[1;36m                     ║");
         println!("║                                                               ║");
         println!("╚═══════════════════════════════════════════════════════════════╝");
         println!("\x1b[0m"); // 重置颜色
@@ -286,7 +286,7 @@ impl Repl {
 
     // 打印帮助信息
     fn print_help(&self) {
-        println!("\n\x1b[1;36m=== Kisechan's DB-Engine Help ===\x1b[0m\n");
+        println!("\n\x1b[1;36mKisechan's DB-Engine Help\x1b[0m\n");
         
         println!("\x1b[1;33mSpecial Commands:\x1b[0m");
         println!("  .help, .h         Show this help message");
@@ -322,7 +322,7 @@ impl Repl {
         println!("\n\x1b[1;33mExamples:\x1b[0m");
         println!("  CREATE DATABASE KisechansDB;");
         println!("  USE KisechansDB;");
-        println!("  CREATE TABLE users (id INT NOT NULL, name VARCHAR(50));");
+        println!("  CREATE TABLE users (id INT, name VARCHAR(50));");
         println!("  SELECT * FROM users WHERE id > 10;");
         
         println!("\n\x1b[1;33mTips:\x1b[0m");
@@ -355,6 +355,13 @@ impl Repl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_output() {
+        let db_mgr = DatabaseManager::new("./test_data/repl_test2").unwrap();
+        let repl = Repl::new(db_mgr).unwrap();
+        repl.print_welcome();
+    }
 
     #[test]
     fn test_repl_creation() {
