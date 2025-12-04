@@ -258,7 +258,7 @@ pub fn task4() -> Result<(), String> {
     // println!("  - 谓词下推 (Predicate Pushdown): 将 WHERE 条件从 Filter 推入 Scan");
     // println!("  - JOIN 优化: 支持多种 JOIN 算法 (Nested Loop, Hash, Sort-Merge)");
     
-    println!("\nTask 4 完成! 所有查询处理流程演示成功\n");
+    println!("\nTask 4 Completed Successfully\n");
     
     Ok(())
 }

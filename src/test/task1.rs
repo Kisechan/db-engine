@@ -29,7 +29,7 @@ fn make_account_record(id: u32, name: &[u8]) -> Record {
 
 // 清理旧的数据文件
 fn cleanup_old_files() -> Result<(), String> {
-    println!("\n===== Cleaning up old files =====");
+    println!("\nCleaning up old files");
     
     let data_dir = "data";
     
@@ -70,7 +70,7 @@ fn ensure_data_dir() -> Result<(), String> {
 }
 
 pub fn task1() -> Result<(), String> {
-    println!("===== Task1 DB Test Start =====");
+    println!("Task1 DB Test Start");
 
     // 指定初始化大小（字节），示例：主存 100 * PAGE_SIZE，磁盘 1000 * PAGE_SIZE
     let mem_bytes = 100 * crate::common::disk_manager::PAGE_SIZE;
@@ -169,7 +169,7 @@ pub fn task1() -> Result<(), String> {
     println!("Scanned {} records.", count);
 
     // // 测试空闲链表
-    // println!("\n===== Testing Free List Reuse =====");
+    // println!("\nTesting Free List Reuse");
 
     // // 删除前 100 条记录
     // println!("Deleting first 100 records...");
@@ -221,6 +221,6 @@ pub fn task1() -> Result<(), String> {
     // let table_stats = rm.get_table_stats("account")?;
     // table_stats.print_summary();
 
-    println!("\n===== Test Completed Successfully =====");
+    println!("\nTask 1 Completed Successfully");
     Ok(())
 }

@@ -30,7 +30,7 @@ fn make_account_record(id: u32, name: &[u8]) -> Record {
 }
 
 fn cleanup_old_files() -> Result<(), String> {
-    println!("\n===== Cleaning up old files =====");
+    println!("\nCleaning up old files");
     
     let data_dir = "data";
     
@@ -72,7 +72,7 @@ fn calculate_entries_per_page(key_size: usize, rid_size: usize) -> usize {
 
 // 显示索引文件的内容（十六进制）
 fn display_index_file_content(file_path: &str, max_lines: usize) -> Result<(), String> {
-    println!("\n===== Index File Content (Hex) =====");
+    println!("\nIndex File Content (Hex)");
     println!("File: {}", file_path);
     println!("Page Size: {} bytes\n", PAGE_SIZE);
     
@@ -129,7 +129,7 @@ fn display_index_stats(
     key_size: usize,
     total_entries: usize,
 ) -> Result<(), String> {
-    println!("\n===== Index Statistics =====");
+    println!("\nIndex Statistics");
     println!("Table: {}", table_name);
     println!("Index Number: {}", index_no);
     println!("Key Size: {} bytes", key_size);
@@ -151,7 +151,7 @@ fn build_index_with_data(
     _table_name: &str,
     sample_ids: Vec<u32>,
 ) -> Result<(), String> {
-    println!("\n===== Building Index =====");
+    println!("\nBuilding Index");
     
     for (i, id) in sample_ids.iter().enumerate() {
         // 使用 ID 作为索引键（4字节小端序）
@@ -172,7 +172,7 @@ fn build_index_with_data(
 
 // 执行索引查询示例
 fn perform_index_queries(handler: &IXHandler, query_ids: Vec<u32>) -> Result<(), String> {
-    println!("\n===== Index Queries =====");
+    println!("\nIndex Queries");
     
     for id in query_ids {
         let key = id.to_le_bytes().to_vec();
@@ -195,7 +195,7 @@ fn perform_index_queries(handler: &IXHandler, query_ids: Vec<u32>) -> Result<(),
 
 // 执行范围扫描
 fn perform_range_scan(handler: &IXHandler, lower_id: u32, upper_id: u32) -> Result<(), String> {
-    println!("\n===== Range Scan =====");
+    println!("\nRange Scan");
     println!("Scanning from ID {} to {}", lower_id, upper_id);
     
     let lower_key = lower_id.to_le_bytes().to_vec();
@@ -224,8 +224,8 @@ fn perform_range_scan(handler: &IXHandler, lower_id: u32, upper_id: u32) -> Resu
 
 pub fn task3() -> Result<(), String> {
     println!("\n\n");
-    println!("========== Task 3: B+ Tree Index Implementation ==========");
-    println!("========== Create, Insert, Modify, Delete operations on B+ Tree Index ==========");
+    println!("Task 3: B+ Tree Index Implementation");
+    println!("Create, Insert, Modify, Delete operations on B+ Tree Index");
     
     // 初始化环境
     let mem_bytes = 100 * PAGE_SIZE;
@@ -254,8 +254,8 @@ pub fn task3() -> Result<(), String> {
     let mut rm = RecordManager::new(table_manager, logger);
     println!("[Init] RecordManager initialized");
 
-    // ===== Phase 1: Create Table and Insert Data =====
-    println!("\n===== Phase 1: Create Table and Insert Data =====");
+    // Phase 1: Create Table and Insert Data
+    println!("\nPhase 1: Create Table and Insert Data");
     
     let schema = TableSchema {
         table_name: "account".to_string(),
@@ -315,8 +315,8 @@ pub fn task3() -> Result<(), String> {
     rm.commit_transaction()?;
     println!("[Phase1] Inserted {} records successfully!", test_data_count);
 
-    // ===== Phase 2: Create Index =====
-    println!("\n===== Phase 2: Create B+ Tree Index =====");
+    // Phase 2: Create Index
+    println!("\nPhase 2: Create B+ Tree Index");
     
     let mut ix_manager = IXManager::new();
     println!("[Phase2] IXManager created");
@@ -333,8 +333,8 @@ pub fn task3() -> Result<(), String> {
     let key_size = 4; // ID 是 u32，4 字节
     display_index_stats("account", 0, key_size, test_data_count)?;
 
-    // ===== Phase 3: Build Index with Data =====
-    println!("\n===== Phase 3: Build Index with Sample Data =====");
+    // Phase 3: Build Index with Data
+    println!("\nPhase 3: Build Index with Sample Data");
     
     {
         let handler = ix_manager.get_handler_mut("account", 0)
@@ -350,8 +350,8 @@ pub fn task3() -> Result<(), String> {
     // 显示更新后的索引文件内容
     display_index_file_content(index_file, 15)?;
 
-    // ===== Phase 4: Index Queries =====
-    println!("\n===== Phase 4: Perform Index Queries =====");
+    // Phase 4: Index Queries
+    println!("\nPhase 4: Perform Index Queries");
     
     {
         let handler = ix_manager.get_handler("account", 0)
@@ -362,8 +362,8 @@ pub fn task3() -> Result<(), String> {
         perform_index_queries(handler, query_ids)?;
     }
 
-    // ===== Phase 5: Range Scan =====
-    println!("\n===== Phase 5: Range Scan Operations =====");
+    // Phase 5: Range Scan
+    println!("\nPhase 5: Range Scan Operations");
     
     {
         let handler = ix_manager.get_handler("account", 0)
@@ -373,8 +373,8 @@ pub fn task3() -> Result<(), String> {
         perform_range_scan(handler, 1010, 1030)?;
     }
 
-    // ===== Phase 6: Update Index =====
-    println!("\n===== Phase 6: Index Update Operations =====");
+    // Phase 6: Update Index
+    println!("\nPhase 6: Index Update Operations");
     
     {
         let handler = ix_manager.get_handler_mut("account", 0)
@@ -393,8 +393,8 @@ pub fn task3() -> Result<(), String> {
         }
     }
 
-    // ===== Phase 7: Verify Index After Updates =====
-    println!("\n===== Phase 7: Verify Index After Updates =====");
+    // Phase 7: Verify Index After Updates
+    println!("\nPhase 7: Verify Index After Updates");
     
     {
         let handler = ix_manager.get_handler("account", 0)
@@ -405,8 +405,8 @@ pub fn task3() -> Result<(), String> {
         perform_index_queries(handler, query_ids)?;
     }
 
-    // ===== Phase 8: Multiple Index Creation =====
-    println!("\n===== Phase 8: Multiple Index Creation =====");
+    // Phase 8: Multiple Index Creation
+    println!("\nPhase 8: Multiple Index Creation");
     
     println!("[Phase8] Creating additional indexes...");
     ix_manager.create_index("account", 1, 4)
@@ -423,8 +423,8 @@ pub fn task3() -> Result<(), String> {
         println!("  - {}", idx);
     }
 
-    // ===== Phase 9: Display System Catalog Information =====
-    println!("\n===== Phase 9: System Catalog Information =====");
+    // Phase 9: Display System Catalog Information
+    println!("\nPhase 9: System Catalog Information");
     println!("[Phase9] Index Catalog Summary:");
     println!("  - Total Indexes: {}", indexes.len());
     println!("  - Table: account");
@@ -447,9 +447,9 @@ pub fn task3() -> Result<(), String> {
         }
     }
 
-    // ===== Phase 10: Summary Statistics =====
-    println!("\n===== Phase 10: Summary Statistics =====");
-    println!("========== Index Performance Report ==========");
+    // Phase 10: Summary Statistics
+    println!("\nPhase 10: Summary Statistics");
+    println!("Index Performance Report");
     println!("Page Size                    : {} bytes", PAGE_SIZE);
     println!("Key Size (ID)                : 4 bytes");
     println!("RID Size                     : 8 bytes");
@@ -466,7 +466,7 @@ pub fn task3() -> Result<(), String> {
         .map_err(|e| format!("Failed to close indexes: {:?}", e))?;
     println!("\n[Cleanup] All indexes closed");
 
-    println!("========== Task 3 Completed Successfully ==========");
+    println!("Task 3 Completed Successfully");
 
     Ok(())
 }
