@@ -2,13 +2,11 @@ use crate::rm::catalog_manager::CatalogManager;
 use crate::rm::record_manager::{Record, RecordManager};
 use crate::rm::transaction_logger::TransactionLogger;
 use crate::rm::table_manager::TableManager;
-use crate::rm::types::*;
 use crate::mm::buffer_manager::BufferManager;
 use crate::fm::FileManager;
 use crate::ix::ix_manager::IXManager;
 use crate::ix::ix_handler::IXHandler;
-use crate::common::RID;
-use crate::common::disk_manager::PAGE_SIZE;
+use crate::common::types::*;
 
 use rand::Rng;
 use std::fs;

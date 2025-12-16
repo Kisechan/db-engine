@@ -22,7 +22,9 @@
 //
 
 use crate::rm::database_manager::DatabaseManager;
+use crate::common::types::{DataType, TableSchema};
 use crate::exec::statement_executor::{StatementExecutor, ExecutionResult};
+use crate::exec::iterator::ExecutorRecord;
 use rustyline::error::ReadlineError;
 use rustyline::{DefaultEditor, Result as RustylineResult};
 use rustyline::history::History;
@@ -222,7 +224,7 @@ impl Repl {
     }
 
     // 打印查询结果（表格格式）
-    fn print_query_result(&self, records: &[crate::exec::iterator::ExecutorRecord], schema: &crate::rm::types::TableSchema) {
+    fn print_query_result(&self, records: &[ExecutorRecord], schema: &TableSchema) {
         let mut table = Table::new();
         
         // 设置表格格式
@@ -266,7 +268,7 @@ impl Repl {
     }
     
     // 解析记录数据为字符串值列表
-    fn parse_record_data(data: &[u8], schema: &crate::rm::types::TableSchema) -> Result<Vec<String>, String> {
+    fn parse_record_data(data: &[u8], schema: &TableSchema) -> Result<Vec<String>, String> {
         let mut values = Vec::new();
         let mut offset = 0;
         
@@ -276,7 +278,7 @@ impl Repl {
             }
             
             match &col.data_type {
-                crate::rm::types::DataType::Int32 => {
+                DataType::Int32 => {
                     if offset + 4 > data.len() {
                         return Err(format!("Not enough data for INT column '{}'", col.name));
                     }
@@ -285,7 +287,7 @@ impl Repl {
                     values.push(value.to_string());
                     offset += 4;
                 }
-                crate::rm::types::DataType::Char(len) => {
+                DataType::Char(len) => {
                     if offset + len > data.len() {
                         return Err(format!("Not enough data for CHAR({}) column '{}'", len, col.name));
                     }
@@ -298,7 +300,7 @@ impl Repl {
                     }
                     offset += len;
                 }
-                crate::rm::types::DataType::VarChar => {
+                DataType::Varchar => {
                     // VARCHAR格式：4字节长度 + 数据
                     if offset + 4 > data.len() {
                         return Err(format!("Not enough data for VARCHAR length in column '{}'", col.name));

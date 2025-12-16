@@ -4,6 +4,7 @@ use crate::ix::node::BPTreeNode;
 use crate::fm::file_manager::FileManager;
 use crate::fm::file_header::FileHeader;
 use crate::common::disk_manager::DiskManager;
+use crate::common::types::PAGE_SIZE;
 use std::collections::HashMap;
 
 // 索引管理器
@@ -71,7 +72,7 @@ impl IXManager {
         let root_data = root_node.serialize();
         
         // 构造完整的页数据（4096 字节）
-        let mut page_data = vec![0u8; crate::common::disk_manager::PAGE_SIZE];
+        let mut page_data = vec![0u8; PAGE_SIZE];
         let data_len = root_data.len();
         page_data[..data_len].copy_from_slice(&root_data);
 

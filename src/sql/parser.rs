@@ -34,6 +34,7 @@
 
 use crate::sql::lexer::Token;
 use crate::sql::ast::*;
+use crate::common::types::DataType;
 
 // 解析错误类型
 #[derive(Debug, Clone, PartialEq)]
@@ -279,13 +280,13 @@ impl Parser {
         let identifier = self.expect_identifier()?;
         
         match identifier.to_uppercase().as_str() {
-            "INT" | "INTEGER" => Ok(DataType::Int),
-            "FLOAT" | "REAL" | "DOUBLE" => Ok(DataType::Float),
+            "INT" | "INTEGER" => Ok(DataType::Int32),
+            // "FLOAT" | "REAL" | "DOUBLE" => Ok(DataType::Float),
             "VARCHAR" => {
                 self.expect(&Token::LeftParen)?;
-                let size = self.expect_integer()?;
+                let _size = self.expect_integer()?; // VARCHAR长度参数，暂时忽略
                 self.expect(&Token::RightParen)?;
-                Ok(DataType::Varchar(size as usize))
+                Ok(DataType::Varchar)
             }
             "CHAR" => {
                 self.expect(&Token::LeftParen)?;
@@ -1038,9 +1039,9 @@ mod tests {
             assert_eq!(create_stmt.table_name, "users");
             assert_eq!(create_stmt.columns.len(), 2);
             assert_eq!(create_stmt.columns[0].name, "id");
-            assert_eq!(create_stmt.columns[0].data_type, DataType::Int);
+            assert_eq!(create_stmt.columns[0].data_type, DataType::Int32);
             assert_eq!(create_stmt.columns[1].name, "name");
-            assert_eq!(create_stmt.columns[1].data_type, DataType::Varchar(50));
+            assert_eq!(create_stmt.columns[1].data_type, DataType::Varchar);
         } else {
             panic!("Expected CreateTable statement");
         }

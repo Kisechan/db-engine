@@ -50,15 +50,14 @@
 // ```
 //
 use crate::rm::database_manager::{DatabaseManager, DatabaseError};
-use crate::rm::types::{TableSchema, DataType};
 use crate::sql::lexer::Lexer;
-use crate::sql::ast::{Statement, CreateDatabaseStmt, DropDatabaseStmt, UseDatabaseStmt, 
-                      InsertStmt, UpdateStmt, DeleteStmt, Literal};
+use crate::sql::ast::{Statement, CreateDatabaseStmt, DropDatabaseStmt, UseDatabaseStmt, InsertStmt, UpdateStmt, DeleteStmt, Literal, CreateTableStmt, DropTableStmt, SelectStmt};
+use crate::sql::parser::Parser;
 use crate::plan::planner::{Planner, PlannerError};
 use crate::plan::optimizer::Optimizer;
 use crate::plan::physical::{PhysicalPlanner, PhysicalPlannerError};
 use crate::exec::iterator::{Executor, ExecutorRecord};
-
+use crate::common::types::{ColumnDef, DataType, TableSchema};
 // 执行结果枚举
 #[derive(Debug, Clone)]
 pub enum ExecutionResult {
@@ -66,7 +65,7 @@ pub enum ExecutionResult {
     Success(String),
     
     // SELECT 查询结果（记录列表 + 表schema）
-    Query(Vec<ExecutorRecord>, crate::rm::types::TableSchema),
+    Query(Vec<ExecutorRecord>, TableSchema),
     
     // DML 影响的行数（INSERT/UPDATE/DELETE）
     RowsAffected(usize),
@@ -176,7 +175,7 @@ impl<'a> StatementExecutor<'a> {
         let tokens = lexer.tokenize();
 
         // 步骤 2：语法分析
-        let mut parser = crate::sql::parser::Parser::new(tokens);
+        let mut parser = Parser::new(tokens);
         let statement = match parser.parse() {
             Ok(stmt) => stmt,
             Err(e) => {
@@ -293,7 +292,7 @@ impl<'a> StatementExecutor<'a> {
     // ========== 表管理语句执行 ==========
 
     // 执行 CREATE TABLE
-    fn execute_create_table(&mut self, stmt: crate::sql::ast::CreateTableStmt) -> Result<ExecutionResult, ExecutorError> {
+    fn execute_create_table(&mut self, stmt: CreateTableStmt) -> Result<ExecutionResult, ExecutorError> {
         // 检查是否选择了数据库
         let context = match self.db_manager.current_context_mut() {
             Ok(ctx) => ctx,
@@ -303,22 +302,11 @@ impl<'a> StatementExecutor<'a> {
         };
 
         // 将 AST 的列定义转换为 TableSchema 的列定义
-        use crate::rm::types::{ColumnDef, DataType, TableSchema};
         
         let columns: Vec<ColumnDef> = stmt.columns.iter().map(|col| {
-            let col_type = match &col.data_type {
-                crate::sql::ast::DataType::Int => DataType::Int32,
-                crate::sql::ast::DataType::Float => {
-                    // Float 类型暂不支持，使用 Int32 代替
-                    DataType::Int32
-                },
-                crate::sql::ast::DataType::Varchar(n) => DataType::VarChar,
-                crate::sql::ast::DataType::Char(n) => DataType::Char(*n),
-            };
-            
             ColumnDef {
                 name: col.name.clone(),
-                data_type: col_type,
+                data_type: col.data_type.clone(),
                 nullable: col.nullable,
             }
         }).collect();
@@ -344,7 +332,7 @@ impl<'a> StatementExecutor<'a> {
     }
 
     // 执行 DROP TABLE
-    fn execute_drop_table(&mut self, stmt: crate::sql::ast::DropTableStmt) -> Result<ExecutionResult, ExecutorError> {
+    fn execute_drop_table(&mut self, stmt: DropTableStmt) -> Result<ExecutionResult, ExecutorError> {
         // 检查是否选择了数据库
         let context = match self.db_manager.current_context_mut() {
             Ok(ctx) => ctx,
@@ -374,7 +362,7 @@ impl<'a> StatementExecutor<'a> {
     // ========== 查询语句执行 ==========
 
     // 执行 SELECT 查询
-    fn execute_select(&mut self, stmt: crate::sql::ast::SelectStmt) -> Result<ExecutionResult, ExecutorError> {
+    fn execute_select(&mut self, stmt: SelectStmt) -> Result<ExecutionResult, ExecutorError> {
         // 简化版 SELECT 实现：仅支持 SELECT * FROM table（无 WHERE/JOIN）
         
         // 检查是否有 FROM 子句
@@ -642,7 +630,7 @@ impl<'a> StatementExecutor<'a> {
                 record.extend_from_slice(&val.to_le_bytes());
                 Ok(())
             }
-            (Literal::String(s), DataType::VarChar) => {
+            (Literal::String(s), DataType::Varchar) => {
                 // VARCHAR: 存储为 4 字节长度 + 字符串内容
                 let bytes = s.as_bytes();
                 record.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
@@ -664,7 +652,6 @@ impl<'a> StatementExecutor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sql::ast::*;
 
     #[test]
     fn test_create_database() {

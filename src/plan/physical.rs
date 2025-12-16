@@ -115,7 +115,7 @@ impl PhysicalPlanner {
 mod tests {
     use super::*;
     use crate::rm::catalog_manager::CatalogManager;
-    use crate::rm::types::{TableSchema, ColumnDef, DataType};
+    use crate::common::types::{TableSchema, ColumnDef, DataType};
 
     #[test]
     fn test_physical_planner_simple_scan() {

@@ -1,10 +1,8 @@
-use crate::common::types::PageId;
+use crate::common::types::{PageId, PAGE_SIZE};
 use crate::common::disk_manager::DiskManager;
 use super::frame::Frame;
 use super::replacer::{Replacer, LRU};
 use std::collections::HashMap;
-
-const PAGE_SIZE: usize = 4096;
 
 // BufferManager：负责页缓存、替换、脏页管理
 #[derive(Clone)]

@@ -1,7 +1,7 @@
 // Catalog 管理器，负责数据字典的注册、查询和持久化
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
-use crate::rm::types::TableSchema;
+use crate::common::types::TableSchema;
 use crate::common::disk_manager::DiskManager;
 use std::path::{Path, PathBuf};
 

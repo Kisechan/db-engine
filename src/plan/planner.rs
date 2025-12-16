@@ -179,7 +179,7 @@ impl Planner {
 mod tests {
     use super::*;
     use crate::sql::ast::{WhereClause, BinaryOperator, Literal};
-    use crate::rm::types::{TableSchema, ColumnDef, DataType};
+    use crate::common::types::{TableSchema, ColumnDef, DataType};
 
     // 创建测试用的 CatalogManager
     fn create_test_catalog() -> CatalogManager {
@@ -197,7 +197,7 @@ mod tests {
                 },
                 ColumnDef {
                     name: "name".to_string(),
-                    data_type: DataType::VarChar,
+                    data_type: DataType::Varchar,
                     nullable: true,
                 },
                 ColumnDef {

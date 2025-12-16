@@ -1,6 +1,7 @@
 // SQL 抽象语法树 (AST) 定义
 
 use std::fmt;
+use crate::common::types::DataType;
 
 // SQL 语句根节点
 #[derive(Debug, Clone, PartialEq)]
@@ -35,21 +36,11 @@ pub struct ColumnDef {
     pub nullable: bool,
 }
 
-// 数据类型
-#[derive(Debug, Clone, PartialEq)]
-pub enum DataType {
-    Int,
-    Float,
-    Varchar(usize),
-    Char(usize),
-}
-
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            DataType::Int => write!(f, "INT"),
-            DataType::Float => write!(f, "FLOAT"),
-            DataType::Varchar(n) => write!(f, "VARCHAR({})", n),
+            DataType::Int32 => write!(f, "INT"),
+            DataType::Varchar => write!(f, "VARCHAR"),
             DataType::Char(n) => write!(f, "CHAR({})", n),
         }
     }
@@ -240,12 +231,12 @@ mod tests {
             columns: vec![
                 ColumnDef {
                     name: "id".to_string(),
-                    data_type: DataType::Int,
+                    data_type: DataType::Int32,
                     nullable: false,
                 },
                 ColumnDef {
                     name: "name".to_string(),
-                    data_type: DataType::Varchar(50),
+                    data_type: DataType::Char(50),
                     nullable: true,
                 },
             ],

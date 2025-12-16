@@ -1,8 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Read, Write};
 use std::path::Path;
-
-pub const PAGE_SIZE: usize = 4096;
+use crate::common::types::PAGE_SIZE;
 
 // 负责最底层磁盘 I/O，不关注页结构
 pub struct DiskManager;

@@ -325,7 +325,7 @@ impl RecordManager {
     // 表级操作
 
     // 创建表
-    pub fn create_table(&mut self, schema: crate::rm::types::TableSchema) -> Result<(), String> {
+    pub fn create_table(&mut self, schema: crate::common::types::TableSchema) -> Result<(), String> {
         if self.current_txid.is_some() {
             return Err("Cannot create table inside a transaction".to_string());
         }

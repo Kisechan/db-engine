@@ -102,11 +102,11 @@ mod tests {
     fn test_executor_interface() {
         let records = vec![
             ExecutorRecord {
-                rid: crate::common::types::RID { page_id: 1, slot_id: 0 },
+                rid: RID { page_id: 1, slot_id: 0 },
                 data: vec![1, 2, 3],
             },
             ExecutorRecord {
-                rid: crate::common::types::RID { page_id: 1, slot_id: 1 },
+                rid: RID { page_id: 1, slot_id: 1 },
                 data: vec![4, 5, 6],
             },
         ];

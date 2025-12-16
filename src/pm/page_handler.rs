@@ -1,7 +1,5 @@
-use crate::common::types::{SlotId, RID, PageId};
+use crate::common::types::{SlotId, RID, PageId, PAGE_SIZE};
 use super::page_header::PageHeader;
-
-const PAGE_SIZE: usize = 4096;
 
 // Slot 条目：记录数据的偏移和长度
 // 当 offset == -1 时，表示此 slot 已删除

@@ -2,7 +2,7 @@ use crate::rm::catalog_manager::CatalogManager;
 use crate::rm::record_manager::{Record, RecordManager};
 use crate::rm::transaction_logger::TransactionLogger;
 use crate::rm::table_manager::TableManager;
-use crate::rm::types::*;
+use crate::common::types::*;
 use crate::mm::buffer_manager::BufferManager;
 use crate::fm::FileManager;
 
@@ -73,8 +73,8 @@ pub fn task1() -> Result<(), String> {
     println!("Task1 DB Test Start");
 
     // 指定初始化大小（字节），示例：主存 100 * PAGE_SIZE，磁盘 1000 * PAGE_SIZE
-    let mem_bytes = 100 * crate::common::disk_manager::PAGE_SIZE;
-    let disk_bytes = 1000 * crate::common::disk_manager::PAGE_SIZE;
+    let mem_bytes = 100 * PAGE_SIZE;
+    let disk_bytes = 1000 * PAGE_SIZE;
 
     // 确保 data 目录存在
     ensure_data_dir()?;

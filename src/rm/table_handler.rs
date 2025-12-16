@@ -1,11 +1,8 @@
-use crate::rm::types::TableSchema;
-use crate::common::types::{PageId, RID};
-use crate::common::disk_manager::PAGE_SIZE;
+use crate::common::types::{PageId, RID, PAGE_SIZE, TableSchema, ColumnDef};
 use crate::fm::file_handler::FileHandler;
 use crate::pm::page_handler::{PageHandler, SlotEntry};
 use crate::pm::page_header::PageHeader;
 use crate::mm::buffer_manager::BufferManager;
-use crate::rm::types::ColumnDef;
 use crate::pm::long_data::{LongDataPtr, LongDataPage, LongDataPageHeader};
 
 // 表级操作句柄（绑定一个文件）

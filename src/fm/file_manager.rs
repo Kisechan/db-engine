@@ -1,16 +1,7 @@
 use crate::common::disk_manager::DiskManager;
+use crate::common::types::PAGE_SIZE;
 use super::file_handler::FileHandler;
 use super::file_header::FileHeader;
-
-pub struct FileManagerConfig {
-    pub page_size: usize,
-}
-
-impl Default for FileManagerConfig {
-    fn default() -> Self {
-        FileManagerConfig { page_size: 4096 }
-    }
-}
 
 pub struct FileManager;
 
@@ -31,7 +22,7 @@ impl FileManager {
     // 初始化磁盘映像：在指定目录下创建 data/disk.img 并写入指定字节数的空页
     pub fn init_disk_from_size(size: usize, dir: &str) -> Result<(), String> {
         // 计算页数
-        let mut pages = if size == 0 { 1 } else { size / crate::common::disk_manager::PAGE_SIZE };
+        let mut pages = if size == 0 { 1 } else { size / PAGE_SIZE };
         if pages == 0 { pages = 1; }
 
         // 确保目录存在
@@ -44,7 +35,7 @@ impl FileManager {
         DiskManager::create_file(&file_path)
             .map_err(|e| format!("Failed to create disk image {}: {}", file_path, e))?;
 
-        let zero_page = vec![0u8; crate::common::disk_manager::PAGE_SIZE];
+        let zero_page = vec![0u8; PAGE_SIZE];
 
         for i in 0..pages {
             DiskManager::write_page(&file_path, i as u32, &zero_page)
@@ -52,7 +43,7 @@ impl FileManager {
         }
 
         println!("[FileManager] Initialized disk image '{}' with {} pages ({} bytes)",
-            file_path, pages, pages * crate::common::disk_manager::PAGE_SIZE);
+            file_path, pages, pages * PAGE_SIZE);
 
         Ok(())
     }
@@ -66,10 +57,5 @@ impl FileManager {
     // 删除文件
     pub fn delete_file(path: &str) -> Result<(), String> {
         DiskManager::delete_file(path)
-    }
-
-    // 检查文件是否存在
-    pub fn file_exists(path: &str) -> bool {
-        DiskManager::file_exists(path)
     }
 }

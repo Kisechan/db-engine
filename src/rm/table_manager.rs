@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use crate::rm::types::TableSchema;
 use crate::rm::catalog_manager::CatalogManager;
 use crate::rm::table_handler::TableHandler;
 use crate::fm::file_manager::FileManager;
 use crate::fm::file_handler::FileHandler;
 use crate::fm::file_header::FileHeader;
 use crate::common::disk_manager::DiskManager;
+use crate::common::types::TableSchema;
 
 // 管理所有打开的表
 pub struct TableManager {

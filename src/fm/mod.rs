@@ -5,4 +5,4 @@ pub mod file_manager; // 高级文件管理（创建/删除/打开/预分配）
 
 pub use file_handler::FileHandler;
 pub use file_header::FileHeader;
-pub use file_manager::{FileManager, FileManagerConfig};
+pub use file_manager::{FileManager};
