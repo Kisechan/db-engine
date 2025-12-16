@@ -87,7 +87,7 @@ RUST_LOG=db_engine::rm=debug cargo run
 
 交互式界面样式示例如下（截图版本 `v1.3.2`）：
 
-![](./docs/images/image.png)
+![](./docs/images/image_v1.3.2.png)
 
 ### 交互示例
 
