@@ -4,7 +4,25 @@
 
 使用 [![Static Badge](https://img.shields.io/badge/Rust-%23000000?style=flat&logo=rust)](https://rust-lang.org/) 实现。
 
+## 功能实现
+
+课程要求实现的数据库主要有**四个基本功能**，具体介绍可以参考我[**博客**](https://blog.kisechan.space/)中的文章，文章中也提供了对应部分的**课程具体要求**，每一部分我也给出了对应的**测试代码**（在 `./src/test/` 路径下）：
+1. [**内存、外存和记录管理**](https://blog.kisechan.space/2025/db-engine-1/)，对应 [task1](./src/test/task1.rs) 和 [*task2*](./src/test/task2.rs)（*没有要求做实验验证，所以没有对应代码*）。
+2. [**索引**](https://blog.kisechan.space/2025/db-engine-2/)，对应 [task3](./src/test/task3.rs)。
+3. [**SQL 处理**](https://blog.kisechan.space/2025/db-engine-3/)，对应 [task4](./src/test/task4.rs)。
+
+在命令行中输入：
+```bash
+cargo run -- --test
+```
+
+可以运行这几个功能对应的测试代码。
+
 ## 快速开始
+
+### 环境配置
+
+安装并使用 Rust 工具链（`cargo` / `rustc`）即可。
 
 ### 启动交互式数据库（REPL）
 
@@ -25,6 +43,8 @@ RUST_LOG=info cargo run --release
 启动后会看到欢迎界面，可以输入 SQL 命令进行数据库操作。
 
 ### 运行测试
+
+使用下面的命令，可以运行 `task1` ~ `task4` 的测试代码，检查测试结果。
 
 ```bash
 cargo run -- --test
@@ -63,13 +83,6 @@ RUST_LOG=db_engine::rm=debug cargo run
 - **INFO**: 重要操作（创建/删除数据库、切换数据库）
 - **DEBUG**: 调试信息（SQL 执行、查询计划、优化过程）
 
-## 功能实现
-
-课程要求实现的数据库主要有**四大功能**，具体介绍可以参考我[**博客**](https://blog.kisechan.space/)中的文章，文章中也提供了对应部分的**课程具体要求**，每一部分我也给出了对应的**测试代码**（在 `./src/test/` 路径下）：
-1. [**内存、外存和记录管理**](https://blog.kisechan.space/2025/db-engine-1/)，对应 [task1](./src/test/task1.rs) 和 [*task2*](./src/test/task2.rs)（*没有要求做实验验证，所以没有对应代码*）。
-2. [**索引**](https://blog.kisechan.space/2025/db-engine-2/)，对应 [task3](./src/test/task3.rs)。
-3. [**SQL 处理**](https://blog.kisechan.space/2025/db-engine-3/)，对应 [task4](./src/test/task4.rs)。
-
 ## 程序运行示例
 
 交互式界面样式示例如下（截图版本 `v1.3.2`）：
@@ -92,7 +105,7 @@ SELECT * FROM users;
 
 可以得到下面的结果：
 
-```sql
+```
 [DatabaseManager] Created base directory: "./data"
 [DatabaseManager] Found 0 existing database(s): []
 
