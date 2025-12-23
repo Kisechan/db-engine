@@ -49,15 +49,18 @@
 // }
 // ```
 //
-use crate::rm::database_manager::{DatabaseManager, DatabaseError};
+use crate::rm::database_manager::{DatabaseManager, DatabaseError, DatabaseContext};
 use crate::sql::lexer::Lexer;
-use crate::sql::ast::{Statement, CreateDatabaseStmt, DropDatabaseStmt, UseDatabaseStmt, InsertStmt, UpdateStmt, DeleteStmt, Literal, CreateTableStmt, DropTableStmt, SelectStmt};
+use crate::sql::ast::{
+    Statement, CreateDatabaseStmt, DropDatabaseStmt, UseDatabaseStmt,
+    InsertStmt, UpdateStmt, DeleteStmt, Literal, CreateTableStmt, DropTableStmt, SelectStmt,
+    Expression, WhereClause, BinaryOperator,
+};
 use crate::sql::parser::Parser;
-use crate::plan::planner::{Planner, PlannerError};
-use crate::plan::optimizer::Optimizer;
-use crate::plan::physical::{PhysicalPlanner, PhysicalPlannerError};
-use crate::exec::iterator::{Executor, ExecutorRecord};
-use crate::common::types::{ColumnDef, DataType, TableSchema};
+use crate::plan::planner::PlannerError;
+use crate::plan::physical::PhysicalPlannerError;
+use crate::exec::iterator::ExecutorRecord;
+use crate::common::types::{ColumnDef, DataType, TableSchema, RID};
 // 执行结果枚举
 #[derive(Debug, Clone)]
 pub enum ExecutionResult {
@@ -227,7 +230,80 @@ impl<'a> StatementExecutor<'a> {
         }
     }
 
-    // ========== 数据库管理语句执行 ==========
+    // ==================== 辅助方法：封装通用操作 ====================
+    
+    // 获取当前数据库上下文（可变引用）
+    fn get_context_mut(&mut self) -> Result<&mut DatabaseContext, ExecutionResult> {
+        self.db_manager.current_context_mut()
+            .map_err(|_| ExecutionResult::Error(
+                "No database selected. Use 'USE database_name' first".to_string()
+            ))
+    }
+    
+    // 获取当前数据库上下文（不可变引用）
+    fn get_context(&self) -> Result<&DatabaseContext, ExecutionResult> {
+        self.db_manager.current_context()
+            .map_err(|_| ExecutionResult::Error(
+                "No database selected. Use 'USE database_name' first".to_string()
+            ))
+    }
+    
+    // 获取表的 Schema
+    fn get_table_schema(&self, table_name: &str) -> Result<TableSchema, ExecutionResult> {
+        let context = self.get_context()?;
+        context.table_manager.catalog.get_table_schema(table_name)
+            .map_err(|e| ExecutionResult::Error(
+                format!("Table '{}' not found: {}", table_name, e)
+            ))
+    }
+    
+    // 确保表已打开
+    fn ensure_table_open(&mut self, table_name: &str) -> Result<(), ExecutionResult> {
+        let context = self.get_context_mut()?;
+        if !context.table_manager.open_tables.contains_key(table_name) {
+            context.table_manager.open_table(table_name)
+                .map_err(|e| ExecutionResult::Error(
+                    format!("Failed to open table '{}': {}", table_name, e)
+                ))?;
+        }
+        Ok(())
+    }
+    
+    // 刷新表数据到磁盘
+    fn flush_table(&mut self, table_name: &str) -> Result<(), ExecutionResult> {
+        let context = self.get_context_mut()?;
+        if let Some(handler) = context.table_manager.open_tables.get_mut(table_name) {
+            handler.flush()
+                .map_err(|e| ExecutionResult::Error(
+                    format!("Failed to flush table '{}': {}", table_name, e)
+                ))?;
+        }
+        Ok(())
+    }
+    
+    // 扫描表中所有有效记录的 RID
+    // 使用底层 TableHandler::list_valid_rids 方法
+    fn scan_all_rids(&mut self, table_name: &str) -> Result<Vec<RID>, ExecutionResult> {
+        self.ensure_table_open(table_name)?;
+        
+        let context = self.get_context_mut()?;
+        let handler = context.table_manager.open_tables.get_mut(table_name)
+            .ok_or_else(|| ExecutionResult::Error(format!("Table '{}' not opened", table_name)))?;
+        
+        let mut all_rids = Vec::new();
+        let data_pages = handler.get_data_pages().to_vec();
+        
+        for page_id in data_pages {
+            match handler.list_valid_rids(page_id) {
+                Ok(rids) => all_rids.extend(rids),
+                Err(e) => {
+                    log::warn!("Failed to list RIDs on page {}: {}", page_id, e);
+                }
+            }
+        }
+        
+        Ok(all_rids)
+    }
 
     // 执行 CREATE DATABASE
     fn execute_create_database(&mut self, stmt: CreateDatabaseStmt) -> Result<ExecutionResult, ExecutorError> {
@@ -362,139 +438,93 @@ impl<'a> StatementExecutor<'a> {
     // ========== 查询语句执行 ==========
 
     // 执行 SELECT 查询
+    //
+    // TODO:
+    // - [x] 支持 WHERE 子句（条件过滤）
+    // - [ ] 支持指定列投影（SELECT col1, col2）
+    // - [ ] 支持 ORDER BY 排序
+    // - [ ] 支持 LIMIT 分页
+    // - [ ] 支持 DISTINCT 去重
+    // - [ ] 支持 JOIN 多表连接
+    // - [ ] 支持聚合函数（COUNT, SUM, AVG, MAX, MIN）
+    // - [ ] 支持 GROUP BY 分组
+    //
     fn execute_select(&mut self, stmt: SelectStmt) -> Result<ExecutionResult, ExecutorError> {
-        // 简化版 SELECT 实现：仅支持 SELECT * FROM table（无 WHERE/JOIN）
-        
-        // 检查是否有 FROM 子句
+        // 获取表名
         let table_name = match &stmt.from_table {
-            Some(name) => name,
+            Some(name) => name.clone(),
             None => return Ok(ExecutionResult::Error("SELECT must have FROM clause".to_string())),
         };
         
-        if stmt.where_clause.is_some() {
-            return Ok(ExecutionResult::Error("WHERE clause not supported in simplified SELECT".to_string()));
-        }
-        
-        // 获取数据库上下文
-        let db_context = match self.db_manager.current_context_mut() {
-            Ok(ctx) => ctx,
-            Err(_) => return Ok(ExecutionResult::Error("No database selected".to_string())),
-        };
-        
-        // 获取表结构（使用 table_manager.catalog）
-        let schema = match db_context.table_manager.catalog.get_table_schema(table_name) {
+        // 获取表 Schema
+        let schema = match self.get_table_schema(&table_name) {
             Ok(s) => s,
-            Err(e) => return Ok(ExecutionResult::Error(format!("Table '{}' not found: {}", table_name, e))),
+            Err(e) => return Ok(e),
         };
         
-        // 获取或打开表
-        if !db_context.table_manager.open_tables.contains_key(table_name) {
-            // 表未打开，自动打开
-            if let Err(e) = db_context.table_manager.open_table(table_name) {
-                return Ok(ExecutionResult::Error(
-                    format!("Failed to open table '{}': {}", table_name, e)
-                ));
-            }
-        }
+        // 使用 scan_all_rids 获取所有有效记录（底层使用 list_valid_rids）
+        let rids = match self.scan_all_rids(&table_name) {
+            Ok(r) => r,
+            Err(e) => return Ok(e),
+        };
         
-        let table_handler = db_context.table_manager.open_tables.get_mut(table_name)
-            .expect("Table should be opened");
-        
-        // 扫描所有记录
+        // 读取记录并过滤
         let mut rows: Vec<ExecutorRecord> = Vec::new();
         
-        // 遍历所有数据页
-        for &page_id in table_handler.data_pages.clone().iter() {
-            // 读取页面上的有效记录的 RIDs
-            let rids_to_read: Vec<crate::common::types::RID> = {
-                let page_buf = match table_handler.buffer_manager.fetch_page(page_id) {
-                    Ok(buf) => buf,
-                    Err(e) => {
-                        eprintln!("[SELECT] Failed to fetch page {}: {}", page_id, e);
-                        continue;
-                    }
-                };
-                
-                // 解析页面记录
-                let page_handler = crate::pm::page_handler::PageHandler::new(page_buf, page_id);
-                let page_header = match page_handler.read_header() {
-                    Ok(h) => h,
-                    Err(e) => {
-                        eprintln!("[SELECT] Failed to read page header: {}", e);
-                        table_handler.buffer_manager.unpin_page(page_id, false).ok();
-                        continue;
-                    }
-                };
-                
-                let mut valid_rids = Vec::new();
-                
-                // 读取每个 slot
-                for slot_id in 0..page_header.slot_count {
-                    let rid = crate::common::types::RID { page_id, slot_id };
-                    
-                    // 跳过已删除的记录
-                    if let Ok(slot) = page_handler.read_slot(slot_id) {
-                        if slot.offset != -1 {
-                            valid_rids.push(rid);
+        let context = match self.get_context_mut() {
+            Ok(ctx) => ctx,
+            Err(e) => return Ok(e),
+        };
+        
+        let handler = context.table_manager.open_tables.get_mut(&table_name)
+            .expect("Table should be opened by scan_all_rids");
+        
+        for rid in rids {
+            match handler.get(rid) {
+                Ok(data) => {
+                    // 如果有 WHERE 子句，进行条件过滤
+                    if let Some(ref where_clause) = stmt.where_clause {
+                        match Self::evaluate_where_condition(&schema, &data, where_clause) {
+                            Ok(true) => rows.push(ExecutorRecord { rid, data }),
+                            Ok(false) => continue, // 条件不满足，跳过
+                            Err(e) => return Ok(ExecutionResult::Error(e)),
                         }
+                    } else {
+                        // 无 WHERE 子句，返回所有记录
+                        rows.push(ExecutorRecord { rid, data });
                     }
                 }
-                
-                // unpin 页面
-                table_handler.buffer_manager.unpin_page(page_id, false).ok();
-                
-                valid_rids
-            };
-            
-            // 读取记录数据
-            for rid in rids_to_read {
-                match table_handler.get(rid) {
-                    Ok(record_bytes) => {
-                        rows.push(ExecutorRecord {
-                            rid,
-                            data: record_bytes,
-                        });
-                    }
-                    Err(e) => {
-                        eprintln!("[SELECT] Failed to read record {:?}: {}", rid, e);
-                    }
-                }
+                Err(e) => log::warn!("Failed to read record {:?}: {}", rid, e),
             }
         }
         
-        println!("[SELECT] Found {} rows from table '{}'", rows.len(), table_name);
+        log::info!("[SELECT] Found {} rows from table '{}' (after WHERE filter)", rows.len(), table_name);
         
-        // 返回结果（包含schema）
         Ok(ExecutionResult::Query(rows, schema))
     }
     
-    // ========== DML 语句执行 ==========
-    
     // 执行 INSERT 语句
+    //
+    // TODO:
+    // - [ ] 支持 INSERT ... SELECT 语法
+    // - [ ] 支持 DEFAULT 值
+    // - [ ] 支持 NULL 值处理
+    // - [ ] 添加类型检查和约束验证
+    // - [ ] 支持批量插入优化
+    //
     fn execute_insert(&mut self, stmt: InsertStmt) -> Result<ExecutionResult, ExecutorError> {
-        // 检查是否选择了数据库
         let table_name = stmt.table_name.clone();
         
-        // 获取表结构（使用不可变引用）
-        let schema = {
-            let db_context = match self.db_manager.current_context() {
-                Ok(ctx) => ctx,
-                Err(_) => return Ok(ExecutionResult::Error("No database selected. Use 'USE database_name' first".to_string())),
-            };
-            
-            // 使用 table_manager.catalog，因为 CREATE TABLE 修改的是这个实例
-            match db_context.table_manager.catalog.get_table_schema(&table_name) {
-                Ok(s) => s,
-                Err(e) => return Ok(ExecutionResult::Error(format!("Table '{}' not found: {}", table_name, e))),
-            }
+        // 获取表 Schema
+        let schema = match self.get_table_schema(&table_name) {
+            Ok(s) => s,
+            Err(e) => return Ok(e),
         };
         
         // 验证列数
-        let column_count = if let Some(ref cols) = stmt.columns {
-            cols.len()
-        } else {
-            schema.columns.len()
-        };
+        let column_count = stmt.columns.as_ref()
+            .map(|cols| cols.len())
+            .unwrap_or(schema.columns.len());
         
         let mut inserted_count = 0;
         
@@ -507,47 +537,34 @@ impl<'a> StatementExecutor<'a> {
             }
             
             // 将字面量转换为字节数据
-            let record = match self.literals_to_record(&schema, &stmt.columns, row) {
+            let record = match Self::literals_to_record(&schema, &stmt.columns, row) {
                 Ok(r) => r,
                 Err(e) => return Ok(ExecutionResult::Error(format!("Failed to convert values: {}", e))),
             };
             
-            // 插入记录
-            let db_context = match self.db_manager.current_context_mut() {
-                Ok(ctx) => ctx,
-                Err(e) => return Ok(ExecutionResult::Error(format!("Failed to get database context: {:?}", e))),
-            };
-            
-            // 获取或打开表
-            if !db_context.table_manager.open_tables.contains_key(&table_name) {
-                // 表未打开，需要打开
-                if let Err(e) = db_context.table_manager.open_table(&table_name) {
-                    return Ok(ExecutionResult::Error(
-                        format!("Failed to open table '{}': {}", table_name, e)
-                    ));
-                }
+            // 确保表已打开
+            if let Err(e) = self.ensure_table_open(&table_name) {
+                return Ok(e);
             }
             
-            let table_handler = db_context.table_manager.open_tables.get_mut(&table_name)
+            let context = match self.get_context_mut() {
+                Ok(ctx) => ctx,
+                Err(e) => return Ok(e),
+            };
+            
+            let handler = context.table_manager.open_tables.get_mut(&table_name)
                 .expect("Table should be opened");
             
-            // 插入记录
-            match table_handler.insert(&record) {
+            // 使用底层 insert 方法
+            match handler.insert(&record) {
                 Ok(_rid) => inserted_count += 1,
                 Err(e) => return Ok(ExecutionResult::Error(format!("Failed to insert record: {}", e))),
             }
         }
         
-        // INSERT 完成后，刷新数据到磁盘
-        let db_context = match self.db_manager.current_context_mut() {
-            Ok(ctx) => ctx,
-            Err(e) => return Ok(ExecutionResult::Error(format!("Failed to get database context: {:?}", e))),
-        };
-        
-        if let Some(table_handler) = db_context.table_manager.open_tables.get_mut(&table_name) {
-            if let Err(e) = table_handler.flush() {
-                return Ok(ExecutionResult::Error(format!("Failed to flush table data: {}", e)));
-            }
+        // 刷新到磁盘
+        if let Err(e) = self.flush_table(&table_name) {
+            return Ok(e);
         }
         
         Ok(ExecutionResult::Success(
@@ -556,95 +573,496 @@ impl<'a> StatementExecutor<'a> {
     }
     
     // 执行 UPDATE 语句
-    fn execute_update(&mut self, _stmt: UpdateStmt) -> Result<ExecutionResult, ExecutorError> {
-        Ok(ExecutionResult::Error(
-            "UPDATE statement not fully implemented yet".to_string()
+    //
+    // TODO:
+    // - [ ] 实现表达式求值（evaluate_expression）
+    // - [ ] 实现 WHERE 条件匹配（evaluate_condition）
+    // - [ ] 支持更新多个列
+    // - [ ] 支持算术表达式（如 SET age = age + 1）
+    // - [ ] 添加类型检查
+    // - [ ] 支持子查询作为值
+    //
+    fn execute_update(&mut self, stmt: UpdateStmt) -> Result<ExecutionResult, ExecutorError> {
+        let table_name = stmt.table_name.clone();
+        
+        // 获取表 Schema
+        let schema = match self.get_table_schema(&table_name) {
+            Ok(s) => s,
+            Err(e) => return Ok(e),
+        };
+        
+        // 获取所有记录 RID
+        let all_rids = match self.scan_all_rids(&table_name) {
+            Ok(r) => r,
+            Err(e) => return Ok(e),
+        };
+        
+        let mut updated_count = 0;
+        
+        for rid in all_rids {
+            // 读取当前记录
+            let context = match self.get_context_mut() {
+                Ok(ctx) => ctx,
+                Err(e) => return Ok(e),
+            };
+            
+            let handler = context.table_manager.open_tables.get_mut(&table_name)
+                .expect("Table should be opened");
+            
+            let record = match handler.get(rid) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            
+            // 检查 WHERE 条件
+            if let Some(ref where_clause) = stmt.where_clause {
+                match Self::evaluate_where_condition(&schema, &record, where_clause) {
+                    Ok(true) => {} // 条件满足，继续更新
+                    Ok(false) => continue, // 条件不满足，跳过
+                    Err(e) => return Ok(ExecutionResult::Error(e)),
+                }
+            }
+            
+            // 应用更新
+            let new_record = match Self::apply_updates(&schema, &record, &stmt.assignments) {
+                Ok(r) => r,
+                Err(e) => return Ok(ExecutionResult::Error(e)),
+            };
+            
+            // 重新获取 handler（因为借用规则）
+            let context = match self.get_context_mut() {
+                Ok(ctx) => ctx,
+                Err(e) => return Ok(e),
+            };
+            
+            let handler = context.table_manager.open_tables.get_mut(&table_name)
+                .expect("Table should be opened");
+            
+            // 使用底层 update 方法
+            match handler.update(rid, &new_record) {
+                Ok(_) => updated_count += 1,
+                Err(e) => return Ok(ExecutionResult::Error(format!("Failed to update record: {}", e))),
+            }
+        }
+        
+        // 刷新到磁盘
+        if let Err(e) = self.flush_table(&table_name) {
+            return Ok(e);
+        }
+        
+        Ok(ExecutionResult::Success(
+            format!("{} row(s) updated in '{}'", updated_count, table_name)
         ))
     }
     
-    // 执行 DELETE 语句  
-    fn execute_delete(&mut self, _stmt: DeleteStmt) -> Result<ExecutionResult, ExecutorError> {
-        Ok(ExecutionResult::Error(
-            "DELETE statement not fully implemented yet".to_string()
+    // 执行 DELETE 语句
+    //
+    // TODO:
+    // - [ ] 支持复杂条件（AND/OR/NOT）
+    // - [ ] 支持子查询条件
+    // - [ ] 添加删除前确认机制（可选）
+    // - [ ] 支持 TRUNCATE TABLE 快速清空
+    //
+    fn execute_delete(&mut self, stmt: DeleteStmt) -> Result<ExecutionResult, ExecutorError> {
+        let table_name = stmt.table_name.clone();
+        
+        // 获取表 Schema（用于 WHERE 条件）
+        let schema = match self.get_table_schema(&table_name) {
+            Ok(s) => s,
+            Err(e) => return Ok(e),
+        };
+        
+        // 使用 scan_all_rids 获取所有记录（底层使用 list_valid_rids）
+        let all_rids = match self.scan_all_rids(&table_name) {
+            Ok(r) => r,
+            Err(e) => return Ok(e),
+        };
+        
+        // 收集需要删除的 RID
+        let mut rids_to_delete = Vec::new();
+        
+        if stmt.where_clause.is_none() {
+            // 无 WHERE 子句，删除所有记录
+            rids_to_delete = all_rids;
+        } else {
+            // 有 WHERE 子句，需要过滤
+            let where_clause = stmt.where_clause.as_ref().unwrap();
+            
+            let context = match self.get_context_mut() {
+                Ok(ctx) => ctx,
+                Err(e) => return Ok(e),
+            };
+            
+            let handler = context.table_manager.open_tables.get_mut(&table_name)
+                .expect("Table should be opened");
+            
+            for rid in all_rids {
+                let record = match handler.get(rid) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                
+                match Self::evaluate_where_condition(&schema, &record, where_clause) {
+                    Ok(true) => rids_to_delete.push(rid),
+                    Ok(false) => continue,
+                    Err(e) => return Ok(ExecutionResult::Error(e)),
+                }
+            }
+        }
+        
+        // 执行删除
+        let mut deleted_count = 0;
+        
+        let context = match self.get_context_mut() {
+            Ok(ctx) => ctx,
+            Err(e) => return Ok(e),
+        };
+        
+        let handler = context.table_manager.open_tables.get_mut(&table_name)
+            .expect("Table should be opened");
+        
+        for rid in rids_to_delete {
+            match handler.delete(rid) {
+                Ok(()) => deleted_count += 1,
+                Err(e) => return Ok(ExecutionResult::Error(format!("Failed to delete record: {}", e))),
+            }
+        }
+        
+        // 刷新到磁盘
+        if let Err(e) = self.flush_table(&table_name) {
+            return Ok(e);
+        }
+        
+        Ok(ExecutionResult::Success(
+            format!("{} row(s) deleted from '{}'", deleted_count, table_name)
         ))
     }
     
-    // 辅助方法：将字面量列表转换为记录字节
+    // ==================== 记录序列化/反序列化 ====================
+    
+    // 将字面量列表转换为记录字节
     fn literals_to_record(
-        &self,
         schema: &TableSchema,
         columns: &Option<Vec<String>>,
         values: &[Literal],
     ) -> Result<Vec<u8>, String> {
         let mut record = Vec::new();
         
-        // 如果指定了列名，需要按表结构顺序填充
         if let Some(col_names) = columns {
-            // 创建列名到值的映射
+            // 指定列名，需要按表结构顺序填充
             let mut value_map: std::collections::HashMap<&str, &Literal> = std::collections::HashMap::new();
             for (i, col_name) in col_names.iter().enumerate() {
                 value_map.insert(col_name.as_str(), &values[i]);
             }
             
-            // 按表结构顺序填充值
             for col_def in &schema.columns {
                 if let Some(literal) = value_map.get(col_def.name.as_str()) {
-                    self.append_literal_to_record(&mut record, literal, &col_def.data_type)?;
+                    Self::append_literal(&mut record, literal, &col_def.data_type)?;
                 } else {
                     return Err(format!("Missing value for column '{}'", col_def.name));
                 }
             }
         } else {
-            // 没有指定列名，按顺序填充
+            // 按顺序填充
             if values.len() != schema.columns.len() {
                 return Err(format!(
                     "Column count mismatch: table has {} columns, got {} values",
-                    schema.columns.len(),
-                    values.len()
+                    schema.columns.len(), values.len()
                 ));
             }
             
             for (i, literal) in values.iter().enumerate() {
-                self.append_literal_to_record(&mut record, literal, &schema.columns[i].data_type)?;
+                Self::append_literal(&mut record, literal, &schema.columns[i].data_type)?;
             }
         }
         
         Ok(record)
     }
     
-    // 辅助方法：将单个字面量添加到记录中
-    fn append_literal_to_record(
-        &self,
-        record: &mut Vec<u8>,
-        literal: &Literal,
-        data_type: &DataType,
-    ) -> Result<(), String> {
+    // 将单个字面量序列化到记录中
+    fn append_literal(record: &mut Vec<u8>, literal: &Literal, data_type: &DataType) -> Result<(), String> {
         match (literal, data_type) {
             (Literal::Integer(n), DataType::Int32) => {
                 record.extend_from_slice(&(*n as i32).to_le_bytes());
                 Ok(())
             }
             (Literal::Boolean(b), DataType::Int32) => {
-                // 布尔值存储为 INT (0 或 1)
                 let val = if *b { 1i32 } else { 0i32 };
                 record.extend_from_slice(&val.to_le_bytes());
                 Ok(())
             }
             (Literal::String(s), DataType::Varchar) => {
-                // VARCHAR: 存储为 4 字节长度 + 字符串内容
                 let bytes = s.as_bytes();
                 record.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
                 record.extend_from_slice(bytes);
                 Ok(())
             }
+            (Literal::String(s), DataType::Char(n)) => {
+                let mut char_bytes = vec![0u8; *n];
+                let s_bytes = s.as_bytes();
+                let copy_len = s_bytes.len().min(*n);
+                char_bytes[..copy_len].copy_from_slice(&s_bytes[..copy_len]);
+                record.extend_from_slice(&char_bytes);
+                Ok(())
+            }
             (Literal::Null, _) => {
-                // NULL 值的处理（简化版：使用特殊标记）
+                // TODO: 实现 NULL 值处理（需要 NULL bitmap）
                 Err("NULL values not fully supported yet".to_string())
             }
             _ => Err(format!(
                 "Type mismatch: cannot convert {:?} to {:?}",
                 literal, data_type
             )),
+        }
+    }
+    
+    // ==================== WHERE 条件求值 ====================
+    //
+    // TODO:
+    // - [ ] 支持 LIKE 模式匹配
+    // - [ ] 支持 IN 列表
+    // - [ ] 支持 BETWEEN 范围
+    // - [ ] 支持 IS NULL / IS NOT NULL
+    //
+    
+    // 求值 WHERE 条件
+    fn evaluate_where_condition(
+        schema: &TableSchema,
+        record: &[u8],
+        where_clause: &WhereClause,
+    ) -> Result<bool, String> {
+        Self::evaluate_expression_bool(schema, record, &where_clause.condition)
+    }
+    
+    // 求值表达式并返回布尔值
+    fn evaluate_expression_bool(
+        schema: &TableSchema,
+        record: &[u8],
+        expr: &Expression,
+    ) -> Result<bool, String> {
+        match expr {
+            Expression::BinaryOp { left, op, right } => {
+                match op {
+                    BinaryOperator::And => {
+                        let l = Self::evaluate_expression_bool(schema, record, left)?;
+                        let r = Self::evaluate_expression_bool(schema, record, right)?;
+                        Ok(l && r)
+                    }
+                    BinaryOperator::Or => {
+                        let l = Self::evaluate_expression_bool(schema, record, left)?;
+                        let r = Self::evaluate_expression_bool(schema, record, right)?;
+                        Ok(l || r)
+                    }
+                    BinaryOperator::Eq | BinaryOperator::Ne |
+                    BinaryOperator::Lt | BinaryOperator::Le |
+                    BinaryOperator::Gt | BinaryOperator::Ge => {
+                        let left_val = Self::evaluate_expression_value(schema, record, left)?;
+                        let right_val = Self::evaluate_expression_value(schema, record, right)?;
+                        Self::compare_values(&left_val, &right_val, op)
+                    }
+                    _ => Err(format!("Unsupported operator in WHERE: {:?}", op)),
+                }
+            }
+            Expression::Literal(Literal::Boolean(b)) => Ok(*b),
+            _ => Err("Invalid WHERE condition expression".to_string()),
+        }
+    }
+    
+    // 求值表达式并返回值
+    fn evaluate_expression_value(
+        schema: &TableSchema,
+        record: &[u8],
+        expr: &Expression,
+    ) -> Result<ExprValue, String> {
+        match expr {
+            Expression::Literal(lit) => Ok(ExprValue::from_literal(lit)),
+            Expression::Column(col_name) => {
+                Self::read_column_value(schema, record, col_name)
+            }
+            Expression::Parenthesized(inner) => {
+                Self::evaluate_expression_value(schema, record, inner)
+            }
+            _ => Err(format!("Unsupported expression type: {:?}", expr)),
+        }
+    }
+    
+    // 从记录中读取列值
+    fn read_column_value(
+        schema: &TableSchema,
+        record: &[u8],
+        col_name: &str,
+    ) -> Result<ExprValue, String> {
+        // 找到列的位置
+        let col_idx = schema.columns.iter().position(|c| c.name == col_name)
+            .ok_or_else(|| format!("Column '{}' not found", col_name))?;
+        
+        let col_def = &schema.columns[col_idx];
+        
+        // 计算偏移量
+        let mut offset = 0;
+        for i in 0..col_idx {
+            offset += Self::column_size(&schema.columns[i].data_type, record, offset);
+        }
+        
+        // 读取值
+        match &col_def.data_type {
+            DataType::Int32 => {
+                if offset + 4 <= record.len() {
+                    let bytes = &record[offset..offset + 4];
+                    let val = i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                    Ok(ExprValue::Integer(val as i64))
+                } else {
+                    Err("Record too short for INT32".to_string())
+                }
+            }
+            DataType::Varchar => {
+                if offset + 4 <= record.len() {
+                    let len_bytes = &record[offset..offset + 4];
+                    let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+                    if offset + 4 + len <= record.len() {
+                        let s = String::from_utf8_lossy(&record[offset + 4..offset + 4 + len]).to_string();
+                        Ok(ExprValue::String(s))
+                    } else {
+                        Err("Record too short for VARCHAR data".to_string())
+                    }
+                } else {
+                    Err("Record too short for VARCHAR length".to_string())
+                }
+            }
+            DataType::Char(n) => {
+                if offset + n <= record.len() {
+                    let s = String::from_utf8_lossy(&record[offset..offset + n])
+                        .trim_end_matches('\0')
+                        .to_string();
+                    Ok(ExprValue::String(s))
+                } else {
+                    Err("Record too short for CHAR".to_string())
+                }
+            }
+        }
+    }
+    
+    // 计算列在记录中的大小
+    fn column_size(data_type: &DataType, record: &[u8], offset: usize) -> usize {
+        match data_type {
+            DataType::Int32 => 4,
+            DataType::Char(n) => *n,
+            DataType::Varchar => {
+                if offset + 4 <= record.len() {
+                    let len_bytes = &record[offset..offset + 4];
+                    let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
+                    4 + len
+                } else {
+                    4
+                }
+            }
+        }
+    }
+    
+    // 比较两个值
+    fn compare_values(left: &ExprValue, right: &ExprValue, op: &BinaryOperator) -> Result<bool, String> {
+        match (left, right) {
+            (ExprValue::Integer(l), ExprValue::Integer(r)) => {
+                Ok(match op {
+                    BinaryOperator::Eq => l == r,
+                    BinaryOperator::Ne => l != r,
+                    BinaryOperator::Lt => l < r,
+                    BinaryOperator::Le => l <= r,
+                    BinaryOperator::Gt => l > r,
+                    BinaryOperator::Ge => l >= r,
+                    _ => return Err(format!("Invalid comparison operator: {:?}", op)),
+                })
+            }
+            (ExprValue::String(l), ExprValue::String(r)) => {
+                Ok(match op {
+                    BinaryOperator::Eq => l == r,
+                    BinaryOperator::Ne => l != r,
+                    BinaryOperator::Lt => l < r,
+                    BinaryOperator::Le => l <= r,
+                    BinaryOperator::Gt => l > r,
+                    BinaryOperator::Ge => l >= r,
+                    _ => return Err(format!("Invalid comparison operator: {:?}", op)),
+                })
+            }
+            _ => Err("Cannot compare values of different types".to_string()),
+        }
+    }
+    
+    // ==================== UPDATE 辅助方法 ====================
+    
+    // 应用 UPDATE 的赋值列表
+    fn apply_updates(
+        schema: &TableSchema,
+        record: &[u8],
+        assignments: &[(String, Expression)],
+    ) -> Result<Vec<u8>, String> {
+        let mut new_record = record.to_vec();
+        
+        for (col_name, expr) in assignments {
+            // 找到列
+            let col_idx = schema.columns.iter().position(|c| c.name == *col_name)
+                .ok_or_else(|| format!("Column '{}' not found", col_name))?;
+            
+            let col_def = &schema.columns[col_idx];
+            
+            // 计算偏移量
+            let mut offset = 0;
+            for i in 0..col_idx {
+                offset += Self::column_size(&schema.columns[i].data_type, record, offset);
+            }
+            
+            // 求值新值
+            let new_value = Self::evaluate_expression_value(schema, record, expr)?;
+            
+            // 写入新值
+            match (&col_def.data_type, &new_value) {
+                (DataType::Int32, ExprValue::Integer(n)) => {
+                    if offset + 4 <= new_record.len() {
+                        new_record[offset..offset + 4].copy_from_slice(&(*n as i32).to_le_bytes());
+                    }
+                }
+                (DataType::Varchar, ExprValue::String(_)) => {
+                    // VARCHAR 更新复杂，需要重建记录
+                    // TODO: 实现 VARCHAR 更新
+                    return Err("VARCHAR update not yet supported".to_string());
+                }
+                (DataType::Char(n), ExprValue::String(s)) => {
+                    let mut char_bytes = vec![0u8; *n];
+                    let s_bytes = s.as_bytes();
+                    let copy_len = s_bytes.len().min(*n);
+                    char_bytes[..copy_len].copy_from_slice(&s_bytes[..copy_len]);
+                    if offset + n <= new_record.len() {
+                        new_record[offset..offset + n].copy_from_slice(&char_bytes);
+                    }
+                }
+                _ => return Err(format!("Type mismatch in UPDATE for column '{}'", col_name)),
+            }
+        }
+        
+        Ok(new_record)
+    }
+}
+
+// ==================== 表达式值类型 ====================
+
+// 表达式求值结果
+#[derive(Debug, Clone, PartialEq)]
+enum ExprValue {
+    Integer(i64),
+    Float(f64),
+    String(String),
+    Boolean(bool),
+    Null,
+}
+
+impl ExprValue {
+    fn from_literal(lit: &Literal) -> Self {
+        match lit {
+            Literal::Integer(n) => ExprValue::Integer(*n),
+            Literal::Float(f) => ExprValue::Float(*f),
+            Literal::String(s) => ExprValue::String(s.clone()),
+            Literal::Boolean(b) => ExprValue::Boolean(*b),
+            Literal::Null => ExprValue::Null,
         }
     }
 }
@@ -759,5 +1177,136 @@ mod tests {
 
         // 清理
         let _ = std::fs::remove_dir_all("./test_data/executor_test5");
+    }
+    
+    #[test]
+    fn test_where_clause_select() {
+        // 清理旧数据
+        let _ = std::fs::remove_dir_all("./test_data/executor_where_select");
+        
+        let mut db_mgr = DatabaseManager::new("./test_data/executor_where_select").unwrap();
+        let mut executor = StatementExecutor::new(&mut db_mgr);
+
+        // 设置环境
+        executor.execute("CREATE DATABASE testdb").unwrap();
+        executor.execute("USE testdb").unwrap();
+        executor.execute("CREATE TABLE users (id INT NOT NULL, age INT NOT NULL)").unwrap();
+        
+        // 插入数据
+        executor.execute("INSERT INTO users VALUES (1, 20)").unwrap();
+        executor.execute("INSERT INTO users VALUES (2, 25)").unwrap();
+        executor.execute("INSERT INTO users VALUES (3, 30)").unwrap();
+        executor.execute("INSERT INTO users VALUES (4, 18)").unwrap();
+        
+        // 测试 WHERE 等于
+        let result = executor.execute("SELECT * FROM users WHERE id = 2").unwrap();
+        if let ExecutionResult::Query(rows, _) = result {
+            assert_eq!(rows.len(), 1, "Should find 1 row with id = 2");
+        } else {
+            panic!("Expected Query result");
+        }
+        
+        // 测试 WHERE 大于
+        let result = executor.execute("SELECT * FROM users WHERE age > 20").unwrap();
+        if let ExecutionResult::Query(rows, _) = result {
+            assert_eq!(rows.len(), 2, "Should find 2 rows with age > 20");
+        } else {
+            panic!("Expected Query result");
+        }
+        
+        // 测试 WHERE AND
+        let result = executor.execute("SELECT * FROM users WHERE age >= 20 AND age <= 25").unwrap();
+        if let ExecutionResult::Query(rows, _) = result {
+            assert_eq!(rows.len(), 2, "Should find 2 rows with 20 <= age <= 25");
+        } else {
+            panic!("Expected Query result");
+        }
+        
+        // 测试无 WHERE（返回所有）
+        let result = executor.execute("SELECT * FROM users").unwrap();
+        if let ExecutionResult::Query(rows, _) = result {
+            assert_eq!(rows.len(), 4, "Should find all 4 rows");
+        } else {
+            panic!("Expected Query result");
+        }
+
+        // 清理
+        let _ = std::fs::remove_dir_all("./test_data/executor_where_select");
+    }
+    
+    #[test]
+    fn test_where_clause_delete() {
+        // 清理旧数据
+        let _ = std::fs::remove_dir_all("./test_data/executor_where_delete");
+        
+        let mut db_mgr = DatabaseManager::new("./test_data/executor_where_delete").unwrap();
+        let mut executor = StatementExecutor::new(&mut db_mgr);
+
+        // 设置环境
+        executor.execute("CREATE DATABASE testdb").unwrap();
+        executor.execute("USE testdb").unwrap();
+        executor.execute("CREATE TABLE users (id INT NOT NULL, age INT NOT NULL)").unwrap();
+        
+        // 插入数据
+        executor.execute("INSERT INTO users VALUES (1, 20)").unwrap();
+        executor.execute("INSERT INTO users VALUES (2, 25)").unwrap();
+        executor.execute("INSERT INTO users VALUES (3, 30)").unwrap();
+        
+        // 删除 age = 25 的记录
+        let result = executor.execute("DELETE FROM users WHERE age = 25").unwrap();
+        if let ExecutionResult::Success(msg) = result {
+            assert!(msg.contains("1 row"), "Should delete 1 row");
+        } else {
+            panic!("Expected Success result");
+        }
+        
+        // 验证剩余记录
+        let result = executor.execute("SELECT * FROM users").unwrap();
+        if let ExecutionResult::Query(rows, _) = result {
+            assert_eq!(rows.len(), 2, "Should have 2 rows remaining");
+        } else {
+            panic!("Expected Query result");
+        }
+
+        // 清理
+        let _ = std::fs::remove_dir_all("./test_data/executor_where_delete");
+    }
+    
+    #[test]
+    fn test_where_clause_update() {
+        // 清理旧数据
+        let _ = std::fs::remove_dir_all("./test_data/executor_where_update");
+        
+        let mut db_mgr = DatabaseManager::new("./test_data/executor_where_update").unwrap();
+        let mut executor = StatementExecutor::new(&mut db_mgr);
+
+        // 设置环境
+        executor.execute("CREATE DATABASE testdb").unwrap();
+        executor.execute("USE testdb").unwrap();
+        executor.execute("CREATE TABLE users (id INT NOT NULL, age INT NOT NULL)").unwrap();
+        
+        // 插入数据
+        executor.execute("INSERT INTO users VALUES (1, 20)").unwrap();
+        executor.execute("INSERT INTO users VALUES (2, 25)").unwrap();
+        executor.execute("INSERT INTO users VALUES (3, 30)").unwrap();
+        
+        // 更新 id = 2 的记录
+        let result = executor.execute("UPDATE users SET age = 26 WHERE id = 2").unwrap();
+        if let ExecutionResult::Success(msg) = result {
+            assert!(msg.contains("1 row"), "Should update 1 row");
+        } else {
+            panic!("Expected Success result, got {:?}", result);
+        }
+        
+        // 验证更新结果
+        let result = executor.execute("SELECT * FROM users WHERE age = 26").unwrap();
+        if let ExecutionResult::Query(rows, _) = result {
+            assert_eq!(rows.len(), 1, "Should find 1 row with age = 26");
+        } else {
+            panic!("Expected Query result");
+        }
+
+        // 清理
+        let _ = std::fs::remove_dir_all("./test_data/executor_where_update");
     }
 }
