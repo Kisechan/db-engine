@@ -8,8 +8,6 @@
 // 本测试演示完整的查询处理流程
 
 use crate::sql::lexer::Lexer;
-use crate::sql::ast::Expression;
-use crate::plan::logical::LogicalPlan;
 
 // 演示数据类型
 #[derive(Debug, Clone, PartialEq)]
@@ -93,71 +91,6 @@ fn physical_plan_generation(sql: &str) -> Result<String, String> {
     };
     
     Ok(physical_desc)
-}
-
-// 格式化逻辑计划为可读的字符串
-fn format_logical_plan(plan: &LogicalPlan) -> String {
-    match plan {
-        LogicalPlan::Scan { table_name } => {
-            format!("Scan({})", table_name)
-        }
-        LogicalPlan::Filter { child, predicate } => {
-            let child_str = format_logical_plan(child);
-            let pred_str = format!("{:?}", predicate);
-            format!("Filter({}) -> [{}]", pred_str, child_str)
-        }
-        LogicalPlan::Project { child, columns } => {
-            let child_str = format_logical_plan(child);
-            let cols_str = columns.iter()
-                .map(|c| c.clone())
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("Project([{}]) -> [{}]", cols_str, child_str)
-        }
-        LogicalPlan::Join { left, right, on_condition, join_type } => {
-            let left_str = format_logical_plan(left);
-            let right_str = format_logical_plan(right);
-            let cond_str = match on_condition {
-                Some(cond) => format!("ON {:?}", cond),
-                None => "".to_string(),
-            };
-            format!("Join({:?} {}) -> [{}] ⨯ [{}]", join_type, cond_str, left_str, right_str)
-        }
-    }
-}
-
-// 格式化物理计划（Executor 树）
-fn format_physical_plan(plan: &LogicalPlan) -> String {
-    match plan {
-        LogicalPlan::Scan { table_name } => {
-            format!("-> SeqScanExecutor({})", table_name)
-        }
-        LogicalPlan::Filter { child, predicate } => {
-            let child_str = format_physical_plan(child);
-            let pred_str = format!("{:?}", predicate);
-            format!("-> FilterExecutor({})\n  {}", pred_str, child_str)
-        }
-        LogicalPlan::Project { child, columns } => {
-            let child_str = format_physical_plan(child);
-            let cols_str = columns.iter()
-                .map(|c| c.clone())
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("-> ProjectionExecutor([{}])\n  {}", cols_str, child_str)
-        }
-        LogicalPlan::Join { left, right, on_condition, join_type } => {
-            let left_str = format_physical_plan(left);
-            let right_str = format_physical_plan(right);
-            let cond_str = match on_condition {
-                Some(cond) => format!("ON {:?}", cond),
-                None => "".to_string(),
-            };
-            format!(
-                "-> NestedLoopJoinExecutor({:?} {})\n  Left:\n    {}\n  Right:\n    {}",
-                join_type, cond_str, left_str, right_str
-            )
-        }
-    }
 }
 
 // 完整的查询处理演示

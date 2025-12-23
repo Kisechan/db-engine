@@ -133,7 +133,7 @@ impl DatabaseManager {
             println!("[DatabaseManager] Created base directory: {:?}", base_path);
         }
         
-        let mut manager = DatabaseManager {
+        let manager = DatabaseManager {
             base_path,
             databases: HashMap::new(),
             current_database: None,

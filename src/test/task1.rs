@@ -11,11 +11,9 @@ use rand::Rng;
 use crate::common::RID;
 
 fn random_name() -> Vec<u8> {
-    let mut rng = rand::thread_rng();
-    let mut s: Vec<u8> = (0..20)
-        .map(|_| rng.gen_range(b'a'..=b'z'))
-        .collect();
-    s
+    (0..20)
+        .map(|_| rand::rng().random_range(b'a'..=b'z'))
+        .collect()
 }
 
 // 序列化为 fixed_part

@@ -4,9 +4,7 @@ use serde::{Serialize, Deserialize};
 use crate::common::types::TableSchema;
 use crate::common::disk_manager::DiskManager;
 use std::path::{Path, PathBuf};
-
-// Catalog 页面大小
-const PAGE_SIZE: usize = 4096;
+use crate::common::types::PAGE_SIZE;
 
 // 内存 + 持久化的 Catalog 管理器
 #[derive(Serialize, Deserialize)]

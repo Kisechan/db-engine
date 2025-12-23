@@ -12,11 +12,9 @@ use rand::Rng;
 use std::fs;
 
 fn random_name() -> Vec<u8> {
-    let mut rng = rand::thread_rng();
-    let mut s: Vec<u8> = (0..20)
-        .map(|_| rng.gen_range(b'a'..=b'z'))
-        .collect();
-    s
+    (0..20)
+        .map(|_| rand::rng().random_range(b'a'..=b'z'))
+        .collect()
 }
 
 fn make_account_record(id: u32, name: &[u8]) -> Record {
