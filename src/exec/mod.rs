@@ -24,8 +24,3 @@ pub mod filter;
 pub mod join;
 pub mod statement_executor;
 
-pub use iterator::{Executor, ExecutorRecord, ExecutorBox};
-pub use scan::SeqScanExecutor;
-pub use filter::FilterExecutor;
-pub use join::NestedLoopJoinExecutor;
-pub use statement_executor::{StatementExecutor, ExecutionResult, ExecutorError};

@@ -2,7 +2,6 @@ use crate::ix::errors::{IXResult, IXError};
 use crate::ix::ix_handler::IXHandler;
 use crate::ix::node::BPTreeNode;
 use crate::fm::file_manager::FileManager;
-use crate::fm::file_header::FileHeader;
 use crate::common::disk_manager::DiskManager;
 use crate::common::types::PAGE_SIZE;
 use std::collections::HashMap;

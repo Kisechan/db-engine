@@ -1,7 +1,7 @@
 use crate::common::types::{PageId, PAGE_SIZE};
 use crate::common::disk_manager::DiskManager;
 use super::file_header::FileHeader;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
 
 // 已打开的文件句柄
 #[derive(Clone)]

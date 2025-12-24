@@ -1,9 +1,9 @@
-use crate::common::types::{PageId, RID, PAGE_SIZE, TableSchema, ColumnDef};
+use crate::common::types::{PageId, RID, PAGE_SIZE, TableSchema};
 use crate::fm::file_handler::FileHandler;
 use crate::pm::page_handler::{PageHandler, SlotEntry};
 use crate::pm::page_header::PageHeader;
 use crate::mm::buffer_manager::BufferManager;
-use crate::pm::long_data::{LongDataPtr, LongDataPage, LongDataPageHeader};
+use crate::pm::long_data::{LongDataPtr, LongDataPage};
 
 // 表级操作句柄（绑定一个文件）
 #[derive(Clone)]

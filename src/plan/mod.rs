@@ -13,7 +13,3 @@ pub mod planner;
 pub mod optimizer;
 pub mod physical;
 
-pub use logical::{LogicalPlan, JoinType};
-pub use planner::{Planner, PlannerError};
-pub use optimizer::Optimizer;
-pub use physical::{PhysicalPlanner, PhysicalPlannerError};

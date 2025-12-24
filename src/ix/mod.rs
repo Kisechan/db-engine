@@ -5,6 +5,3 @@ pub mod bplustree;
 pub mod node;
 pub mod errors;
 
-pub use ix_manager::IXManager;
-pub use ix_handler::{IXHandler, IXIndexHandler};
-pub use scan::IXScan;

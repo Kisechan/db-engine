@@ -3,7 +3,7 @@
 // 将 SQL AST 转换为逻辑计划树。
 // 过程中使用元数据表检查表和列的存在性（Binding）。
 
-use crate::plan::logical::{LogicalPlan, JoinType};
+use crate::plan::logical::LogicalPlan;
 use crate::sql::ast::{SelectStmt, SelectField, Expression};
 use crate::rm::catalog_manager::CatalogManager;
 

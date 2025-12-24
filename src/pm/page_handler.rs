@@ -1,4 +1,4 @@
-use crate::common::types::{SlotId, RID, PageId, PAGE_SIZE};
+use crate::common::types::{RID, PageId, PAGE_SIZE};
 use super::page_header::PageHeader;
 
 // Slot 条目：记录数据的偏移和长度

@@ -2,13 +2,12 @@
 // 
 // 将优化后的逻辑计划树转换为物理执行器树。
 
-use crate::plan::logical::{LogicalPlan, JoinType};
+use crate::plan::logical::LogicalPlan;
 use crate::exec::iterator::ExecutorBox;
 use crate::exec::scan::SeqScanExecutor;
 use crate::exec::filter::FilterExecutor;
 use crate::exec::join::NestedLoopJoinExecutor;
 use crate::rm::table_manager::TableManager;
-use crate::sql::ast::Expression;
 
 // 物理规划错误
 #[derive(Debug, Clone, PartialEq)]
@@ -114,8 +113,10 @@ impl PhysicalPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan::logical::JoinType;
     use crate::rm::catalog_manager::CatalogManager;
     use crate::common::types::{TableSchema, ColumnDef, DataType};
+    use crate::sql::ast::Expression;
 
     #[test]
     fn test_physical_planner_simple_scan() {

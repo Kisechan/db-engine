@@ -49,7 +49,7 @@ impl TableManager {
             .map_err(|e| format!("Failed to create data file for table '{}': {}", table_name, e))?;
 
         // 初始化 FileHeader
-        let mut default_header = FileHeader::default();
+        let default_header = FileHeader::default();
         
         // 创建文件句柄
         let file_handler = FileHandler::new(file_path_str.to_string(), default_header);
