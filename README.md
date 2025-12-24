@@ -116,7 +116,7 @@ SELECT * FROM users;
 
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║                 Kisechan's DB-Engine v1.3.2                   ║
+║                 Kisechan's DB-Engine v1.3.3                   ║
 ║                                                               ║
 ║           A relational database engine written in Rust        ║
 ║                                                               ║
@@ -176,15 +176,165 @@ Goodbye!
 [DatabaseManager] All databases closed
 ```
 
-## todo 和未完成的部分
+## TODO 和未完成的部分
 
 下面的功能*也许在可见的未来不会实现*，但是暂时先标出来：
 
-- [x] SQL 解析和 REPL
-- [ ] 部分 SQL 语句（如 `UPDATE`）功能的执行逻辑，目前只有解析
-- [ ] `SELECT` 子句的聚合函数、子查询、`GROUP BY`、表达式计算
-- [ ] 更多数据类型
+### SQL 解析和执行
+
+#### DDL（数据定义语言）
+- [x] `CREATE DATABASE` / `DROP DATABASE`
+- [x] `USE DATABASE`
+- [x] `SHOW DATABASES` / `SHOW TABLES`
+- [x] `CREATE TABLE` / `DROP TABLE`
+- [ ] `ALTER TABLE`（添加/删除列、修改列类型）
+- [ ] `CREATE INDEX` / `DROP INDEX`
+- [ ] `TRUNCATE TABLE`（快速清空表）
+
+#### DML（数据操作语言）
+
+**`SELECT` 查询**
+- [x] 基本查询：`SELECT * FROM table`
+- [x] `WHERE` 子句（支持 `=`, `!=`, `<`, `<=`, `>`, `>=`, `AND`, `OR`）
+- [ ] 列投影：`SELECT col1, col2 FROM table`
+- [ ] `ORDER BY`（排序）
+- [ ] `LIMIT` / `OFFSET`（分页）
+- [ ] `DISTINCT`（去重）
+- [ ] `JOIN`（`INNER JOIN`, `LEFT JOIN`, `RIGHT JOIN`, `FULL JOIN`）
+- [ ] 聚合函数：`COUNT`, `SUM`, `AVG`, `MAX`, `MIN`
+- [ ] `GROUP BY` / `HAVING`（分组和分组过滤）
+- [ ] 子查询（`WHERE col IN (SELECT ...)`）
+- [ ] `UNION` / `INTERSECT` / `EXCEPT`（集合操作）
+
+**`INSERT` 插入**
+- [x] 基本插入：`INSERT INTO table VALUES (...)`
+- [x] 指定列插入：`INSERT INTO table (col1, col2) VALUES (...)`
+- [ ] `INSERT ... SELECT`（从查询结果插入）
+- [ ] `DEFAULT` 值支持
+- [ ] 批量插入优化
+- [ ] 约束检查（`PRIMARY KEY`, `UNIQUE`, `FOREIGN KEY`, `CHECK`）
+
+**`UPDATE` 更新**
+- [x] 基本更新：`UPDATE table SET col = value`
+- [x] `WHERE` 条件过滤
+- [x] 支持 `INT` 类型列更新
+- [ ] 支持 `VARCHAR` 类型列更新
+- [ ] 算术表达式：`UPDATE table SET age = age + 1`
+- [ ] 子查询作为值：`UPDATE table SET col = (SELECT ...)`
+- [ ] 多列更新优化
+
+**`DELETE` 删除**
+- [x] 基本删除：`DELETE FROM table`
+- [x] `WHERE` 条件过滤（支持 `AND` / `OR`）
+- [ ] 子查询条件：`DELETE FROM table WHERE id IN (SELECT ...)`
+- [ ] 级联删除（`FOREIGN KEY` 约束）
+
+#### `WHERE` 条件表达式
+- [x] 比较操作符：`=`, `!=`, `<`, `<=`, `>`, `>=`
+- [x] 逻辑操作符：`AND`, `OR`
+- [x] 括号表达式
+- [ ] `NOT` 操作符（AST 已支持，求值需扩展）
+- [ ] `LIKE` / `NOT LIKE`（模式匹配）
+- [ ] `IN` / `NOT IN`（列表匹配）
+- [ ] `BETWEEN ... AND ...`（范围）
+- [ ] `IS NULL` / `IS NOT NULL`
+- [ ] 算术表达式：`WHERE age + 10 > 30`
+- [ ] 字符串函数：`CONCAT`, `SUBSTRING`, `UPPER`, `LOWER`
+
+### 数据类型
+
+- [x] `INT` / `INT32`
+- [x] `VARCHAR(n)`
+- [x] `CHAR(n)`
+- [ ] `BIGINT` / `INT64`
+- [ ] `FLOAT` / `DOUBLE`
+- [ ] `DECIMAL(p, s)`（精确数值）
+- [ ] `DATE` / `TIME` / `DATETIME` / `TIMESTAMP`
+- [ ] `BOOLEAN`
+- [ ] `BLOB` / `TEXT`（大对象）
+- [ ] `NULL`
+
+### 索引
+
+- [x] B+ 树索引结构
+- [x] 索引插入、查询
+- [x] 多索引支持
+- [ ] SQL 语句创建/删除索引（`CREATE INDEX`, `DROP INDEX`）
+- [ ] 查询优化器自动使用索引
+- [ ] 唯一索引（`UNIQUE INDEX`）
+- [ ] 复合索引（多列索引）
+- [ ] 全文索引
+- [ ] 索引统计信息（用于查询优化）
+
+### 查询优化
+
+#### 逻辑优化
+
+- [x] 逻辑计划生成
+- [x] 谓词下推（Predicate Pushdown）
+
+#### 物理优化
+
+- [x] 基本物理计划生成
 - [ ] 基于代价的优化
-- [ ] 利用索引的优化器
-- [ ] SQL 查询缓存
-- [ ] 事务管理
+- [ ] 利用索引的查询计划
+- [ ] `JOIN` 优化
+
+#### 其他
+
+- [ ] 查询结果缓存
+- [ ] 预编译语句（Prepared Statements）
+- [ ] 查询计划缓存
+
+### 事务和并发控制
+
+#### 事务日志
+
+- [x] 事务日志 `TransactionLogger`
+- [ ] `BEGIN`, `COMMIT`, `ABORT` 操作
+- [ ] SQL 语句支持：`BEGIN TRANSACTION`, `COMMIT`, `ROLLBACK`
+- [ ] 崩溃恢复（Crash Recovery）
+- [ ] 重做日志（Redo Log）
+- [ ] 撤销日志（Undo Log）
+- [ ] 检查点（Checkpoint）
+
+#### 并发控制
+
+- [ ] 两阶段锁（2PL）
+- [ ] 死锁检测和处理
+- [ ] 多版本并发控制（MVCC）
+- [ ] 隔离级别支持（`READ UNCOMMITTED`, `READ COMMITTED`, `REPEATABLE READ`, `SERIALIZABLE`）
+
+### 系统管理
+
+#### 存储管理
+
+- [x] 页面管理（`BufferManager`, `DiskManager`）
+- [x] 文件管理（`FileHandler`, `FileManager`）
+- [ ] 自动扩展数据文件
+- [ ] 空间回收和碎片整理
+- [ ] 表空间管理
+
+#### 元数据管理
+
+- [x] 目录管理（`CatalogManager`）
+- [x] 表结构持久化
+- [ ] 统计信息收集
+- [ ] 约束信息管理
+- [ ] 视图（`VIEW`）
+
+#### 数据库管理
+
+- [ ] 数据库备份和恢复
+- [ ] 导入/导出（`COPY`, `LOAD DATA`）
+- [ ] 权限管理（用户、角色、权限）
+- [ ] 审计日志
+
+### 性能和扩展
+
+- [ ] 批量操作优化
+
+### 客户端和接口
+
+- [x] 命令行 REPL
+- [x] 日志系统

@@ -335,7 +335,7 @@ impl Repl {
         println!("\x1b[1;36m"); // 青色粗体
         println!("╔═══════════════════════════════════════════════════════════════╗");
         println!("║                                                               ║");
-        println!("║                 \x1b[1;33mKisechan's DB-Engine v1.3.2\x1b[1;36m                   ║");
+        println!("║                 \x1b[1;33mKisechan's DB-Engine v1.3.3\x1b[1;36m                   ║");
         println!("║                                                               ║");
         println!("║           A relational database engine written in Rust        ║");
         println!("║                                                               ║");
