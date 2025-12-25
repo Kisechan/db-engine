@@ -27,7 +27,17 @@ cargo run -- --test
 
 ### 环境配置
 
-安装并使用 Rust 工具链（`cargo` / `rustc`）即可。
+本项目依赖 ![Static Badge](https://img.shields.io/badge/Rust-2021_edition-%23000000?style=flat&logo=rust&logoColor=%23000000&labelColor=%23DCDCDC) 开发，安装 Rust 工具链（`cargo` / `rustc`，stable）即可。
+ 
+ 开发本项目使用的系统是 ![Static Badge](https://img.shields.io/badge/WSL%2FUbuntu-22.04-%23E95420?style=flat&logo=ubuntu&labelColor=%23DCDCDC) （前期）和 ![Static Badge](https://img.shields.io/badge/macOS-Tahoe_26-%23000000?style=flat&logo=macos&labelColor=%23DCDCDC&logoColor=%23000000) (后期)。
+
+推荐使用 Rust 官方提供的 [rustup](https://rustup.rs) 进行安装配置。
+
+安装完成后可输入下列命令确认安装完成：
+```bash
+rustc --version
+cargo --version
+```
 
 ### 启动交互式数据库（REPL）
 
@@ -35,7 +45,7 @@ cargo run -- --test
 # 开发模式
 cargo run
 
-# 生产模式（推荐，性能更好）
+# 生产模式
 cargo run --release
 
 # 启用日志（开发调试）
@@ -83,10 +93,10 @@ RUST_LOG=db_engine::rm=debug cargo run
 ```
 
 日志级别说明：
-- **ERROR**: 错误信息（数据库操作失败、解析错误）
-- **WARN**: 警告信息（资源已存在等）
-- **INFO**: 重要操作（创建/删除数据库、切换数据库）
-- **DEBUG**: 调试信息（SQL 执行、查询计划、优化过程）
+- **`ERROR`**: 错误信息（数据库操作失败、解析错误）
+- **`WARN`**: 警告信息（资源已存在等）
+- **`INFO`**: 重要操作（创建/删除数据库、切换数据库）
+- **`DEBUG`**: 调试信息（SQL 执行、查询计划、优化过程）
 
 ## 程序运行示例
 
