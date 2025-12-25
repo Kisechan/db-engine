@@ -275,7 +275,9 @@ impl Parser {
         })
     }
 
-    // 解析数据类型: INT | FLOAT | VARCHAR(n) | CHAR(n)
+    // 解析数据类型: INT | VARCHAR | CHAR(n)
+    // VARCHAR: 变长字符串，不需要参数
+    // CHAR(n): 定长字符串，必须指定长度
     fn parse_data_type(&mut self) -> Result<DataType, ParseError> {
         let identifier = self.expect_identifier()?;
         
@@ -283,12 +285,11 @@ impl Parser {
             "INT" | "INTEGER" => Ok(DataType::Int32),
             // "FLOAT" | "REAL" | "DOUBLE" => Ok(DataType::Float),
             "VARCHAR" => {
-                self.expect(&Token::LeftParen)?;
-                let _size = self.expect_integer()?; // VARCHAR长度参数，暂时忽略
-                self.expect(&Token::RightParen)?;
+                // VARCHAR 不接受参数，直接返回
                 Ok(DataType::Varchar)
             }
             "CHAR" => {
+                // CHAR 必须带参数 CHAR(n)
                 self.expect(&Token::LeftParen)?;
                 let size = self.expect_integer()?;
                 self.expect(&Token::RightParen)?;
@@ -1033,7 +1034,7 @@ mod tests {
 
     #[test]
     fn test_parse_create_table() {
-        let stmt = parse_sql("CREATE TABLE users (id INT, name VARCHAR(50))").unwrap();
+        let stmt = parse_sql("CREATE TABLE users (id INT, name VARCHAR)").unwrap();
         
         if let Statement::CreateTable(create_stmt) = stmt {
             assert_eq!(create_stmt.table_name, "users");
@@ -1049,7 +1050,7 @@ mod tests {
 
     #[test]
     fn test_parse_create_table_with_nullable() {
-        let stmt = parse_sql("CREATE TABLE users (id INT NOT NULL, name VARCHAR(50) NULL)").unwrap();
+        let stmt = parse_sql("CREATE TABLE users (id INT NOT NULL, name VARCHAR NULL)").unwrap();
         
         if let Statement::CreateTable(create_stmt) = stmt {
             assert_eq!(create_stmt.columns[0].nullable, false);

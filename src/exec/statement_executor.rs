@@ -61,6 +61,7 @@ use crate::plan::planner::PlannerError;
 use crate::plan::physical::PhysicalPlannerError;
 use crate::exec::iterator::ExecutorRecord;
 use crate::common::types::{ColumnDef, DataType, TableSchema, RID};
+use crate::pm::long_data::LongDataPtr;
 // 执行结果枚举
 #[derive(Debug, Clone)]
 pub enum ExecutionResult {
@@ -485,13 +486,22 @@ impl<'a> StatementExecutor<'a> {
                     // 如果有 WHERE 子句，进行条件过滤
                     if let Some(ref where_clause) = stmt.where_clause {
                         match Self::evaluate_where_condition(&schema, &data, where_clause) {
-                            Ok(true) => rows.push(ExecutorRecord { rid, data }),
+                            Ok(true) => {
+                                // 解析 VARCHAR 字段，将 LongDataPtr 替换为实际数据
+                                match Self::expand_varchar_in_record(&schema, &data, handler) {
+                                    Ok(expanded_data) => rows.push(ExecutorRecord { rid, data: expanded_data }),
+                                    Err(e) => return Ok(ExecutionResult::Error(format!("Failed to read VARCHAR: {}", e))),
+                                }
+                            }
                             Ok(false) => continue, // 条件不满足，跳过
                             Err(e) => return Ok(ExecutionResult::Error(e)),
                         }
                     } else {
-                        // 无 WHERE 子句，返回所有记录
-                        rows.push(ExecutorRecord { rid, data });
+                        // 无 WHERE 子句，返回所有记录（展开 VARCHAR）
+                        match Self::expand_varchar_in_record(&schema, &data, handler) {
+                            Ok(expanded_data) => rows.push(ExecutorRecord { rid, data: expanded_data }),
+                            Err(e) => return Ok(ExecutionResult::Error(format!("Failed to read VARCHAR: {}", e))),
+                        }
                     }
                 }
                 Err(e) => log::warn!("Failed to read record {:?}: {}", rid, e),
@@ -536,12 +546,6 @@ impl<'a> StatementExecutor<'a> {
                 ));
             }
             
-            // 将字面量转换为字节数据
-            let record = match Self::literals_to_record(&schema, &stmt.columns, row) {
-                Ok(r) => r,
-                Err(e) => return Ok(ExecutionResult::Error(format!("Failed to convert values: {}", e))),
-            };
-            
             // 确保表已打开
             if let Err(e) = self.ensure_table_open(&table_name) {
                 return Ok(e);
@@ -554,6 +558,12 @@ impl<'a> StatementExecutor<'a> {
             
             let handler = context.table_manager.open_tables.get_mut(&table_name)
                 .expect("Table should be opened");
+            
+            // 将字面量转换为字节数据（传入 handler 以处理 VARCHAR）
+            let record = match Self::literals_to_record_with_handler(&schema, &stmt.columns, row, handler) {
+                Ok(r) => r,
+                Err(e) => return Ok(ExecutionResult::Error(format!("Failed to convert values: {}", e))),
+            };
             
             // 使用底层 insert 方法
             match handler.insert(&record) {
@@ -623,10 +633,20 @@ impl<'a> StatementExecutor<'a> {
                 }
             }
             
-            // 应用更新
-            let new_record = match Self::apply_updates(&schema, &record, &stmt.assignments) {
-                Ok(r) => r,
-                Err(e) => return Ok(ExecutionResult::Error(e)),
+            // 应用更新（传入 handler 以支持 VARCHAR）
+            let new_record = {
+                let context = match self.get_context_mut() {
+                    Ok(ctx) => ctx,
+                    Err(e) => return Ok(e),
+                };
+                
+                let handler = context.table_manager.open_tables.get_mut(&table_name)
+                    .expect("Table should be opened");
+                
+                match Self::apply_updates_with_handler(&schema, &record, &stmt.assignments, handler) {
+                    Ok(r) => r,
+                    Err(e) => return Ok(ExecutionResult::Error(e)),
+                }
             };
             
             // 重新获取 handler（因为借用规则）
@@ -721,8 +741,19 @@ impl<'a> StatementExecutor<'a> {
         let handler = context.table_manager.open_tables.get_mut(&table_name)
             .expect("Table should be opened");
         
-        for rid in rids_to_delete {
-            match handler.delete(rid) {
+        for rid in &rids_to_delete {
+            // 删除前先释放 VARCHAR 占用的长数据页面
+            match handler.get(*rid) {
+                Ok(record) => {
+                    if let Err(e) = Self::release_varchar_in_record(&schema, &record, handler) {
+                        log::warn!("Failed to release VARCHAR data for {:?}: {}", rid, e);
+                    }
+                }
+                Err(e) => log::warn!("Failed to read record {:?} before deletion: {}", rid, e),
+            }
+            
+            // 删除记录
+            match handler.delete(*rid) {
                 Ok(()) => deleted_count += 1,
                 Err(e) => return Ok(ExecutionResult::Error(format!("Failed to delete record: {}", e))),
             }
@@ -740,11 +771,12 @@ impl<'a> StatementExecutor<'a> {
     
     // ==================== 记录序列化/反序列化 ====================
     
-    // 将字面量列表转换为记录字节
-    fn literals_to_record(
+    // 将字面量列表转换为记录字节（不处理 VARCHAR，由调用者处理）
+    fn literals_to_record_with_handler(
         schema: &TableSchema,
         columns: &Option<Vec<String>>,
         values: &[Literal],
+        handler: &mut crate::rm::table_handler::TableHandler,
     ) -> Result<Vec<u8>, String> {
         let mut record = Vec::new();
         
@@ -757,7 +789,7 @@ impl<'a> StatementExecutor<'a> {
             
             for col_def in &schema.columns {
                 if let Some(literal) = value_map.get(col_def.name.as_str()) {
-                    Self::append_literal(&mut record, literal, &col_def.data_type)?;
+                    Self::append_literal_with_handler(&mut record, literal, &col_def.data_type, handler)?;
                 } else {
                     return Err(format!("Missing value for column '{}'", col_def.name));
                 }
@@ -772,15 +804,20 @@ impl<'a> StatementExecutor<'a> {
             }
             
             for (i, literal) in values.iter().enumerate() {
-                Self::append_literal(&mut record, literal, &schema.columns[i].data_type)?;
+                Self::append_literal_with_handler(&mut record, literal, &schema.columns[i].data_type, handler)?;
             }
         }
         
         Ok(record)
     }
     
-    // 将单个字面量序列化到记录中
-    fn append_literal(record: &mut Vec<u8>, literal: &Literal, data_type: &DataType) -> Result<(), String> {
+    // 将单个字面量序列化到记录中（对 VARCHAR 使用 LongDataPtr）
+    fn append_literal_with_handler(
+        record: &mut Vec<u8>,
+        literal: &Literal,
+        data_type: &DataType,
+        handler: &mut crate::rm::table_handler::TableHandler,
+    ) -> Result<(), String> {
         match (literal, data_type) {
             (Literal::Integer(n), DataType::Int32) => {
                 record.extend_from_slice(&(*n as i32).to_le_bytes());
@@ -792,9 +829,10 @@ impl<'a> StatementExecutor<'a> {
                 Ok(())
             }
             (Literal::String(s), DataType::Varchar) => {
+                // VARCHAR 使用 LongDataPtr 存储
                 let bytes = s.as_bytes();
-                record.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-                record.extend_from_slice(bytes);
+                let ptr = handler.store_var_data(bytes)?;
+                record.extend_from_slice(&ptr.serialize());
                 Ok(())
             }
             (Literal::String(s), DataType::Char(n)) => {
@@ -824,6 +862,87 @@ impl<'a> StatementExecutor<'a> {
     // - [ ] 支持 BETWEEN 范围
     // - [ ] 支持 IS NULL / IS NOT NULL
     //
+    
+    // 展开记录中的 VARCHAR 字段（将 LongDataPtr 替换为实际字符串数据：4字节长度+内容）
+    fn expand_varchar_in_record(
+        schema: &TableSchema,
+        record: &[u8],
+        handler: &mut crate::rm::table_handler::TableHandler,
+    ) -> Result<Vec<u8>, String> {
+        let mut expanded = Vec::new();
+        let mut offset = 0;
+        
+        for col in &schema.columns {
+            match &col.data_type {
+                DataType::Int32 => {
+                    if offset + 4 > record.len() {
+                        return Err(format!("Record too short for INT32 column '{}'", col.name));
+                    }
+                    expanded.extend_from_slice(&record[offset..offset + 4]);
+                    offset += 4;
+                }
+                DataType::Char(n) => {
+                    if offset + n > record.len() {
+                        return Err(format!("Record too short for CHAR column '{}'", col.name));
+                    }
+                    expanded.extend_from_slice(&record[offset..offset + n]);
+                    offset += *n;
+                }
+                DataType::Varchar => {
+                    // 读取 LongDataPtr
+                    if offset + 8 > record.len() {
+                        return Err(format!("Record too short for VARCHAR pointer in column '{}'", col.name));
+                    }
+                    let ptr_bytes = &record[offset..offset + 8];
+                    let ptr = LongDataPtr::deserialize(ptr_bytes)?;
+                    offset += 8;
+                    
+                    // 加载实际数据
+                    let var_data = handler.load_var_data(&ptr)?;
+                    
+                    // 写入格式：4字节长度 + 实际数据
+                    expanded.extend_from_slice(&(var_data.len() as u32).to_le_bytes());
+                    expanded.extend_from_slice(&var_data);
+                }
+            }
+        }
+        
+        Ok(expanded)
+    }
+    
+    // 释放记录中所有 VARCHAR 字段占用的长数据页面
+    fn release_varchar_in_record(
+        schema: &TableSchema,
+        record: &[u8],
+        handler: &mut crate::rm::table_handler::TableHandler,
+    ) -> Result<(), String> {
+        let mut offset = 0;
+        
+        for col in &schema.columns {
+            match &col.data_type {
+                DataType::Int32 => {
+                    offset += 4;
+                }
+                DataType::Char(n) => {
+                    offset += *n;
+                }
+                DataType::Varchar => {
+                    // 读取 LongDataPtr
+                    if offset + 8 > record.len() {
+                        return Err(format!("Record too short for VARCHAR pointer in column '{}'", col.name));
+                    }
+                    let ptr_bytes = &record[offset..offset + 8];
+                    let ptr = LongDataPtr::deserialize(ptr_bytes)?;
+                    offset += 8;
+                    
+                    // 释放长数据页面链
+                    handler.release_var_data(&ptr)?;
+                }
+            }
+        }
+        
+        Ok(())
+    }
     
     // 求值 WHERE 条件
     fn evaluate_where_condition(
@@ -916,18 +1035,8 @@ impl<'a> StatementExecutor<'a> {
                 }
             }
             DataType::Varchar => {
-                if offset + 4 <= record.len() {
-                    let len_bytes = &record[offset..offset + 4];
-                    let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
-                    if offset + 4 + len <= record.len() {
-                        let s = String::from_utf8_lossy(&record[offset + 4..offset + 4 + len]).to_string();
-                        Ok(ExprValue::String(s))
-                    } else {
-                        Err("Record too short for VARCHAR data".to_string())
-                    }
-                } else {
-                    Err("Record too short for VARCHAR length".to_string())
-                }
+                // VARCHAR 使用 LongDataPtr（8 字节）
+                Err("VARCHAR reading requires TableHandler access (not available in WHERE evaluation context)".to_string())
             }
             DataType::Char(n) => {
                 if offset + n <= record.len() {
@@ -943,19 +1052,11 @@ impl<'a> StatementExecutor<'a> {
     }
     
     // 计算列在记录中的大小
-    fn column_size(data_type: &DataType, record: &[u8], offset: usize) -> usize {
+    fn column_size(data_type: &DataType, _record: &[u8], _offset: usize) -> usize {
         match data_type {
             DataType::Int32 => 4,
             DataType::Char(n) => *n,
-            DataType::Varchar => {
-                if offset + 4 <= record.len() {
-                    let len_bytes = &record[offset..offset + 4];
-                    let len = u32::from_le_bytes([len_bytes[0], len_bytes[1], len_bytes[2], len_bytes[3]]) as usize;
-                    4 + len
-                } else {
-                    4
-                }
-            }
+            DataType::Varchar => 8, // LongDataPtr 固定 8 字节
         }
     }
     
@@ -990,53 +1091,76 @@ impl<'a> StatementExecutor<'a> {
     
     // ==================== UPDATE 辅助方法 ====================
     
-    // 应用 UPDATE 的赋值列表
-    fn apply_updates(
+    // 应用 UPDATE 的赋值列表（支持 VARCHAR）
+    fn apply_updates_with_handler(
         schema: &TableSchema,
         record: &[u8],
         assignments: &[(String, Expression)],
+        handler: &mut crate::rm::table_handler::TableHandler,
     ) -> Result<Vec<u8>, String> {
-        let mut new_record = record.to_vec();
+        // 对于包含 VARCHAR 更新的情况，需要重建整个记录
+        let mut new_record = Vec::new();
         
+        // 首先解析当前记录的所有列值（包括 LongDataPtr）
+        let mut col_values: Vec<(usize, Vec<u8>)> = Vec::new(); // (col_idx, raw_bytes)
+        let mut offset = 0;
+        
+        for (col_idx, col) in schema.columns.iter().enumerate() {
+            let col_size = Self::column_size(&col.data_type, record, offset);
+            if offset + col_size > record.len() {
+                return Err(format!("Record too short for column '{}'", col.name));
+            }
+            col_values.push((col_idx, record[offset..offset + col_size].to_vec()));
+            offset += col_size;
+        }
+        
+        // 应用赋值更新
         for (col_name, expr) in assignments {
-            // 找到列
             let col_idx = schema.columns.iter().position(|c| c.name == *col_name)
                 .ok_or_else(|| format!("Column '{}' not found", col_name))?;
             
             let col_def = &schema.columns[col_idx];
             
-            // 计算偏移量
-            let mut offset = 0;
-            for i in 0..col_idx {
-                offset += Self::column_size(&schema.columns[i].data_type, record, offset);
-            }
-            
             // 求值新值
             let new_value = Self::evaluate_expression_value(schema, record, expr)?;
             
-            // 写入新值
-            match (&col_def.data_type, &new_value) {
+            // 根据类型生成新的字节数据
+            let new_bytes = match (&col_def.data_type, &new_value) {
                 (DataType::Int32, ExprValue::Integer(n)) => {
-                    if offset + 4 <= new_record.len() {
-                        new_record[offset..offset + 4].copy_from_slice(&(*n as i32).to_le_bytes());
-                    }
+                    (*n as i32).to_le_bytes().to_vec()
                 }
-                (DataType::Varchar, ExprValue::String(_)) => {
-                    // VARCHAR 更新复杂，需要重建记录
-                    // TODO: 实现 VARCHAR 更新
-                    return Err("VARCHAR update not yet supported".to_string());
-                }
-                (DataType::Char(n), ExprValue::String(s)) => {
-                    let mut char_bytes = vec![0u8; *n];
+                (DataType::Char(len), ExprValue::String(s)) => {
+                    let mut char_bytes = vec![0u8; *len];
                     let s_bytes = s.as_bytes();
-                    let copy_len = s_bytes.len().min(*n);
+                    let copy_len = s_bytes.len().min(*len);
                     char_bytes[..copy_len].copy_from_slice(&s_bytes[..copy_len]);
-                    if offset + n <= new_record.len() {
-                        new_record[offset..offset + n].copy_from_slice(&char_bytes);
+                    char_bytes
+                }
+                (DataType::Varchar, ExprValue::String(s)) => {
+                    // 先释放旧的 VARCHAR 数据
+                    if col_values[col_idx].1.len() == 8 {
+                        if let Ok(old_ptr) = LongDataPtr::deserialize(&col_values[col_idx].1) {
+                            if let Err(e) = handler.release_var_data(&old_ptr) {
+                                log::warn!("Failed to release old VARCHAR data: {}", e);
+                            }
+                        }
                     }
+                    
+                    // 存储新的 VARCHAR 数据并获取 LongDataPtr
+                    let bytes = s.as_bytes();
+                    let ptr = handler.store_var_data(bytes)?;
+                    ptr.serialize().to_vec()
                 }
                 _ => return Err(format!("Type mismatch in UPDATE for column '{}'", col_name)),
-            }
+            };
+            
+            // 更新列值
+            col_values[col_idx].1 = new_bytes;
+        }
+        
+        // 重建记录
+        for (_col_idx, bytes) in col_values {
+            new_record.extend_from_slice(&bytes);
         }
         
         Ok(new_record)
@@ -1167,7 +1291,7 @@ mod tests {
         executor.execute("USE testdb").unwrap();
 
         // 创建表
-        let result = executor.execute("CREATE TABLE users (id INT NOT NULL, name VARCHAR(50))").unwrap();
+        let result = executor.execute("CREATE TABLE users (id INT NOT NULL, name VARCHAR)").unwrap();
         if let ExecutionResult::Success(msg) = result {
             assert!(msg.contains("users"));
             assert!(msg.contains("created"));
@@ -1308,5 +1432,125 @@ mod tests {
 
         // 清理
         let _ = std::fs::remove_dir_all("./test_data/executor_where_update");
+    }
+
+    #[test]
+    fn test_varchar_insert_select() {
+        // 清理旧数据
+        let _ = std::fs::remove_dir_all("./test_data/executor_varchar_test");
+        
+        let mut db_mgr = DatabaseManager::new("./test_data/executor_varchar_test").unwrap();
+        let mut executor = StatementExecutor::new(&mut db_mgr);
+
+        // 设置环境
+        executor.execute("CREATE DATABASE testdb").unwrap();
+        executor.execute("USE testdb").unwrap();
+        executor.execute("CREATE TABLE users (id INT NOT NULL, name VARCHAR)").unwrap();
+        
+        // 插入包含 VARCHAR 的数据
+        executor.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
+        executor.execute("INSERT INTO users VALUES (2, 'Bob Johnson')").unwrap();
+        executor.execute("INSERT INTO users VALUES (3, 'Charlie Brown with a very long name')").unwrap();
+        
+        // 查询所有数据
+        let result = executor.execute("SELECT * FROM users").unwrap();
+        if let ExecutionResult::Query(rows, schema) = result {
+            assert_eq!(rows.len(), 3, "Should have 3 rows");
+            
+            // 验证 schema
+            assert_eq!(schema.columns.len(), 2);
+            assert_eq!(schema.columns[0].name, "id");
+            assert_eq!(schema.columns[1].name, "name");
+            assert!(matches!(schema.columns[1].data_type, DataType::Varchar));
+            
+            // 验证数据格式（应该是：INT(4字节) + VARCHAR(4字节长度+数据)）
+            for (i, record) in rows.iter().enumerate() {
+                println!("Record {}: {} bytes", i + 1, record.data.len());
+                // INT: 4 bytes
+                assert!(record.data.len() >= 4, "Record should have at least 4 bytes for ID");
+            }
+        } else {
+            panic!("Expected Query result, got {:?}", result);
+        }
+
+        // 清理
+        let _ = std::fs::remove_dir_all("./test_data/executor_varchar_test");
+    }
+
+    #[test]
+    fn test_varchar_update() {
+        // 清理旧数据
+        let _ = std::fs::remove_dir_all("./test_data/executor_varchar_update");
+        
+        let mut db_mgr = DatabaseManager::new("./test_data/executor_varchar_update").unwrap();
+        let mut executor = StatementExecutor::new(&mut db_mgr);
+
+        // 设置环境
+        executor.execute("CREATE DATABASE testdb").unwrap();
+        executor.execute("USE testdb").unwrap();
+        executor.execute("CREATE TABLE users (id INT NOT NULL, name VARCHAR)").unwrap();
+        
+        // 插入数据
+        executor.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
+        executor.execute("INSERT INTO users VALUES (2, 'Bob')").unwrap();
+        
+        // 更新 VARCHAR 列
+        let result = executor.execute("UPDATE users SET name = 'Alice Johnson' WHERE id = 1").unwrap();
+        if let ExecutionResult::Success(msg) = result {
+            assert!(msg.contains("1 row"), "Should update 1 row");
+        } else {
+            panic!("Expected Success result, got {:?}", result);
+        }
+        
+        // 验证更新结果
+        let result = executor.execute("SELECT * FROM users").unwrap();
+        if let ExecutionResult::Query(rows, _) = result {
+            assert_eq!(rows.len(), 2, "Should have 2 rows");
+            println!("Update test passed: {} rows returned", rows.len());
+        } else {
+            panic!("Expected Query result");
+        }
+
+        // 清理
+        let _ = std::fs::remove_dir_all("./test_data/executor_varchar_update");
+    }
+
+    #[test]
+    fn test_varchar_delete() {
+        // 清理旧数据
+        let _ = std::fs::remove_dir_all("./test_data/executor_varchar_delete");
+        
+        let mut db_mgr = DatabaseManager::new("./test_data/executor_varchar_delete").unwrap();
+        let mut executor = StatementExecutor::new(&mut db_mgr);
+
+        // 设置环境
+        executor.execute("CREATE DATABASE testdb").unwrap();
+        executor.execute("USE testdb").unwrap();
+        executor.execute("CREATE TABLE users (id INT NOT NULL, name VARCHAR)").unwrap();
+        
+        // 插入数据
+        executor.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
+        executor.execute("INSERT INTO users VALUES (2, 'Bob')").unwrap();
+        executor.execute("INSERT INTO users VALUES (3, 'Charlie')").unwrap();
+        
+        // 删除记录（应该释放 VARCHAR 的长数据页面）
+        let result = executor.execute("DELETE FROM users WHERE id = 2").unwrap();
+        if let ExecutionResult::Success(msg) = result {
+            assert!(msg.contains("1 row"), "Should delete 1 row");
+        } else {
+            panic!("Expected Success result, got {:?}", result);
+        }
+        
+        // 验证删除结果
+        let result = executor.execute("SELECT * FROM users").unwrap();
+        if let ExecutionResult::Query(rows, _) = result {
+            assert_eq!(rows.len(), 2, "Should have 2 rows after deletion");
+            println!("Delete test passed: {} rows remaining", rows.len());
+        } else {
+            panic!("Expected Query result");
+        }
+
+        // 清理
+        let _ = std::fs::remove_dir_all("./test_data/executor_varchar_delete");
     }
 }

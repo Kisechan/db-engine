@@ -45,7 +45,7 @@ pub struct TableSchema {
 
 impl TableSchema {
     // 计算一条记录的固定长度（字节）
-    pub fn calculate_fixed_record_size(&self) -> usize {
+    pub fn _calculate_fixed_record_size(&self) -> usize {
         self.columns
             .iter()
             .map(|col| match col.data_type {

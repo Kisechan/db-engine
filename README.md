@@ -112,7 +112,7 @@ RUST_LOG=db_engine::rm=debug cargo run
 CREATE DATABASE testdb;
 USE testdb;
 SHOW TABLES;
-CREATE TABLE users (id INT, name VARCHAR(50), age INT);
+CREATE TABLE users (id INT, name CHAR(50), age INT);
 INSERT INTO users VALUES (1, 'kisechan', 28);
 SELECT * FROM users;
 .exit
@@ -155,7 +155,7 @@ Kisechan's DB-Engine> USE testdb;
 ✓ Switched to database 'testdb'
 Kisechan's DB-Engine [testdb]> SHOW TABLES;
 ✓ No tables found in current database
-Kisechan's DB-Engine [testdb]> CREATE TABLE users (id INT, name VARCHAR(50), age INT);
+Kisechan's DB-Engine [testdb]> CREATE TABLE users (id INT, name CHAR(50), age INT);
 [CatalogManager] Added table 'users' to memory cache with table_id=1
 [CatalogManager] Flushed 1 tables to disk (126 bytes) at "./data/testdb/catalog.tbl"
 [FileHandler] Flushed header to ./data/testdb/users.tbl: size=12 bytes, total_pages=1, free_list_len=0
@@ -254,7 +254,7 @@ Goodbye!
 ### 数据类型
 
 - [x] `INT` / `INT32`
-- [x] `VARCHAR(n)`
+- [x] `VARCHAR`
 - [x] `CHAR(n)`
 - [ ] `BIGINT` / `INT64`
 - [ ] `FLOAT` / `DOUBLE`

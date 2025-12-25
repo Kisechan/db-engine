@@ -327,16 +327,12 @@ impl TableHandler {
             // fetch 页并初始化
             let page_buf = self.buffer_manager.fetch_page(page_id)?;
             {
-                let mut lpage = LongDataPage::new(page_id);
+                let mut lpage = LongDataPage::new(page_buf, page_id);
                 
                 let chunk = &data[current_offset..current_offset + chunk_size];
 
                 // 写入数据
                 lpage.store_data(0, chunk)?;
-
-                // 不在此处额外分配 next page，prev->next 链接将在外部处理
-                // 复制回缓冲区
-                page_buf.copy_from_slice(&lpage.data);
             }
 
             // unpin 并标记为 dirty
@@ -351,10 +347,8 @@ impl TableHandler {
             if let Some(prev_id) = prev_page_id {
                 let prev_buf = self.buffer_manager.fetch_page(prev_id)?;
                 {
-                    let mut lpage = LongDataPage::new(prev_id);
-                    lpage.data.copy_from_slice(prev_buf);
+                    let mut lpage = LongDataPage::new(prev_buf, prev_id);
                     lpage.set_next_page(Some(page_id))?;
-                    prev_buf.copy_from_slice(&lpage.data);
                 }
                 self.buffer_manager.unpin_page(prev_id, true)?;
             }
@@ -384,9 +378,7 @@ impl TableHandler {
             let page_buf = self.buffer_manager.fetch_page(page_id)?;
 
             {
-                let mut lpage = LongDataPage::new(page_id);
-                let lpage_data_copy = page_buf.to_vec();
-                lpage.data.copy_from_slice(&lpage_data_copy);
+                let lpage = LongDataPage::new(page_buf, page_id);
 
                 let data_len = lpage.get_data_length()?;
                 let to_read = std::cmp::min(data_len, remaining);
@@ -415,9 +407,7 @@ impl TableHandler {
             // fetch 页获取 next_page
             let page_buf = self.buffer_manager.fetch_page(page_id)?;
             let next_page_id = {
-                let mut lpage = LongDataPage::new(page_id);
-                let lpage_data_copy = page_buf.to_vec();
-                lpage.data.copy_from_slice(&lpage_data_copy);
+                let lpage = LongDataPage::new(page_buf, page_id);
                 lpage.get_next_page()?
             };
 

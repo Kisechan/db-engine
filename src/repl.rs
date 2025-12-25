@@ -377,7 +377,7 @@ impl Repl {
         println!("\n\x1b[1;33mSupported Data Types:\x1b[0m");
         println!("  INT, INTEGER       32-bit integer");
         println!("  FLOAT, REAL        Floating point number");
-        println!("  VARCHAR(n)         Variable-length string");
+        println!("  VARCHAR            Variable-length string");
         println!("  CHAR(n)            Fixed-length string");
         
         println!("\n\x1b[1;33mQuery:\x1b[0m");
@@ -389,7 +389,7 @@ impl Repl {
         println!("\n\x1b[1;33mExamples:\x1b[0m");
         println!("  CREATE DATABASE KisechansDB;");
         println!("  USE KisechansDB;");
-        println!("  CREATE TABLE users (id INT, name VARCHAR(50));");
+        println!("  CREATE TABLE users (id INT, name VARCHAR);");
         println!("  SELECT * FROM users WHERE id > 10;");
         
         println!("\n\x1b[1;33mTips:\x1b[0m");

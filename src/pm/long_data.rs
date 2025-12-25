@@ -1,10 +1,5 @@
 use crate::common::types::PageId;
 
-pub enum PageType {
-    Normal,
-    LongData, // 专门用于变长字段
-}
-
 // 长数据指针（指向长数据页链的起始页）
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LongDataPtr {
@@ -75,21 +70,21 @@ impl LongDataPageHeader {
     }
 }
 
-// LongDataPage 管理器
-pub struct LongDataPage {
+// LongDataPage 管理器（使用引用设计，类似 PageHandler）
+pub struct LongDataPage<'a> {
+    pub data: &'a mut [u8], // 引用 BufferManager 中的页数据
     pub page_id: PageId,
-    pub data: Vec<u8>, // 原始页数据
 }
 
-impl LongDataPage {
+impl<'a> LongDataPage<'a> {
     const PAGE_SIZE: usize = 4096;
     const HEADER_SIZE: usize = LongDataPageHeader::SIZE;
     const DATA_AREA_SIZE: usize = Self::PAGE_SIZE - Self::HEADER_SIZE;
 
-    pub fn new(page_id: PageId) -> Self {
+    pub fn new(data: &'a mut [u8], page_id: PageId) -> Self {
         LongDataPage {
+            data,
             page_id,
-            data: vec![0u8; Self::PAGE_SIZE],
         }
     }
 
