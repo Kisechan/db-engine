@@ -268,6 +268,16 @@ impl<'a> PageHandler<'a> {
             free_data_space: header.free_space_offset as usize - self.slot_table_end(header.slot_count),
         })
     }
+
+    // TODO: 压缩页面
+    pub fn _compact(&mut self) -> Result<(), String> {
+        // 1. 收集所有有效记录（offset != -1）
+        // 2. 按 offset 从高到低排序
+        // 3. 从 PAGE_SIZE 开始向下重新分配数据空间
+        // 4. 更新所有 slot 的 offset
+        // 5. 更新 free_space_offset
+        Ok(())
+    }
 }
 
 // 页面统计信息结构

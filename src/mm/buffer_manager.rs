@@ -117,9 +117,4 @@ impl BufferManager {
         }
         Ok(())
     }
-
-    // 获取缓冲池大小
-    pub fn get_pool_size(&self) -> usize {
-        self.frames.len()
-    }
 }

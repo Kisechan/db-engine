@@ -1553,4 +1553,91 @@ mod tests {
         // 清理
         let _ = std::fs::remove_dir_all("./test_data/executor_varchar_delete");
     }
+    
+    #[test]
+    fn test_varchar_persistence() {
+        // 测试 VARCHAR 数据在重启后能正确持久化和加载
+        // 清理旧数据
+        let _ = std::fs::remove_dir_all("./test_data/executor_varchar_persist");
+        
+        // 第一阶段：创建数据库和表，插入数据
+        {
+            let mut db_mgr = DatabaseManager::new("./test_data/executor_varchar_persist").unwrap();
+            let mut executor = StatementExecutor::new(&mut db_mgr);
+
+            executor.execute("CREATE DATABASE testdb").unwrap();
+            executor.execute("USE testdb").unwrap();
+            executor.execute("CREATE TABLE users (id INT NOT NULL, name VARCHAR)").unwrap();
+            
+            // 插入多条记录
+            executor.execute("INSERT INTO users VALUES (1, 'Alice')").unwrap();
+            executor.execute("INSERT INTO users VALUES (2, 'Bob')").unwrap();
+            executor.execute("INSERT INTO users VALUES (3, 'Charlie')").unwrap();
+            
+            // 验证插入成功
+            let result = executor.execute("SELECT * FROM users").unwrap();
+            if let ExecutionResult::Query(rows, _) = result {
+                assert_eq!(rows.len(), 3, "Should have 3 rows after insert");
+            } else {
+                panic!("Expected Query result");
+            }
+            
+            println!("Phase 1: Created and inserted 3 rows");
+            // DatabaseManager 离开作用域时会自动关闭并持久化
+        }
+        
+        // 第二阶段：重新打开数据库，验证数据仍然存在
+        {
+            let mut db_mgr = DatabaseManager::new("./test_data/executor_varchar_persist").unwrap();
+            let mut executor = StatementExecutor::new(&mut db_mgr);
+
+            executor.execute("USE testdb").unwrap();
+            
+            // 验证表存在
+            let result = executor.execute("SHOW TABLES").unwrap();
+            if let ExecutionResult::Success(msg) = result {
+                assert!(msg.contains("users"), "Table 'users' should exist");
+            }
+            
+            // 验证数据仍然存在
+            let result = executor.execute("SELECT * FROM users").unwrap();
+            if let ExecutionResult::Query(rows, _) = result {
+                assert_eq!(rows.len(), 3, "Should still have 3 rows after restart");
+                println!("Phase 2: Verified 3 rows after restart");
+            } else {
+                panic!("Expected Query result");
+            }
+            
+            // 插入更多数据
+            executor.execute("INSERT INTO users VALUES (4, 'David')").unwrap();
+            
+            let result = executor.execute("SELECT * FROM users").unwrap();
+            if let ExecutionResult::Query(rows, _) = result {
+                assert_eq!(rows.len(), 4, "Should have 4 rows after new insert");
+                println!("Phase 2: Inserted 1 more row, now 4 rows");
+            } else {
+                panic!("Expected Query result");
+            }
+        }
+        
+        // 第三阶段：再次重新打开，确认所有数据
+        {
+            let mut db_mgr = DatabaseManager::new("./test_data/executor_varchar_persist").unwrap();
+            let mut executor = StatementExecutor::new(&mut db_mgr);
+
+            executor.execute("USE testdb").unwrap();
+            
+            let result = executor.execute("SELECT * FROM users").unwrap();
+            if let ExecutionResult::Query(rows, _) = result {
+                assert_eq!(rows.len(), 4, "Should have 4 rows after second restart");
+                println!("Phase 3: Final verification - 4 rows present");
+            } else {
+                panic!("Expected Query result");
+            }
+        }
+
+        // 清理
+        let _ = std::fs::remove_dir_all("./test_data/executor_varchar_persist");
+        println!("VARCHAR persistence test passed!");
+    }
 }

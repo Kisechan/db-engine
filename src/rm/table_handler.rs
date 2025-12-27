@@ -1,7 +1,7 @@
 use crate::common::types::{PageId, RID, PAGE_SIZE, TableSchema};
 use crate::fm::file_handler::FileHandler;
 use crate::pm::page_handler::{PageHandler, SlotEntry};
-use crate::pm::page_header::PageHeader;
+use crate::pm::page_header::{PageHeader, DATA_PAGE_MAGIC};
 use crate::mm::buffer_manager::BufferManager;
 use crate::pm::long_data::{LongDataPtr, LongDataPage};
 
@@ -11,7 +11,7 @@ pub struct TableHandler {
     pub table_name: String,
     pub schema: TableSchema,
     pub file_handler: FileHandler,
-    // 维护该表的数据页列表（可以从 file header/ catalog 中加载）
+    // 维护该表的数据页列表（只包含记录数据页，不包含 LongData 页）
     pub data_pages: Vec<PageId>,
 
     // 引用或拥有 BufferManager
@@ -20,13 +20,25 @@ pub struct TableHandler {
 
 impl TableHandler {
     pub fn new(table_name: String, schema: TableSchema, file_handler: FileHandler, file_path: String) -> Self {
-        let bm = BufferManager::new(128, file_path);
+        let mut bm = BufferManager::new(128, file_path);
         
-        // 从 FileHeader 加载数据页列表
-        // 页0是 header，页1+ 是数据页
+        // 扫描所有页面，根据页面类型区分数据页和 LongData 页
+        // 页0是 FileHeader，从页1开始
         let mut data_pages = Vec::new();
         for page_id in 1..file_handler.header.total_pages {
-            data_pages.push(page_id);
+            // 尝试读取页面并检查类型
+            if let Ok(page_buf) = bm.fetch_page(page_id) {
+                // 检查页面类型标识（前2字节）
+                let magic = u16::from_le_bytes([page_buf[0], page_buf[1]]);
+                
+                if magic == DATA_PAGE_MAGIC {
+                    // 这是一个记录数据页
+                    data_pages.push(page_id);
+                }
+                // 其他类型（LongData 页或未初始化页）不加入 data_pages
+                
+                let _ = bm.unpin_page(page_id, false);
+            }
         }
         
         TableHandler {
@@ -93,7 +105,7 @@ impl TableHandler {
         }
     }
 
-    // 初始化一个新页（设置 PageHeader）
+    // 初始化一个新页（设置 PageHeader，包含数据页魔数）
     fn init_page(&mut self, page_id: PageId) -> Result<(), String> {
         // fetch_page 获取页缓冲
         let page_buf = self.buffer_manager.fetch_page(page_id)?;
@@ -103,10 +115,12 @@ impl TableHandler {
             let mut ph = PageHandler::new(page_buf, page_id);
             
             // 创建初始页头：
+            // page_type = DATA_PAGE_MAGIC（标识为数据页）
             // free_space_offset = PAGE_SIZE（数据区从顶部开始向下增长）
             // slot_count = 0（没有任何记录）
             // free_slot_head = u16::MAX（没有空闲 slot）
             let init_header = PageHeader {
+                page_type: DATA_PAGE_MAGIC,
                 free_space_offset: PAGE_SIZE as u16,
                 slot_count: 0,
                 free_slot_head: u16::MAX,  // 初始无空闲 slot
